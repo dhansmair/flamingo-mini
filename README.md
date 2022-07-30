@@ -1,17 +1,17 @@
 # Flamingo mini
-Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model">Flamingo</a> vision-language model by deepmind, based on Lucidrains https://github.com/lucidrains/flamingo-pytorch implementation of the perceiver resampler and the gated cross-attention layers. 
+Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">Flamingo</a> vision-language model by deepmind, based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizing pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>.
 
 At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.
 
-The implementation aims to be compatible with the huggingface transformers library. So you can use `save_pretrained()`, `from_pretrained()`, `push_to_hub()`, and so on.
+The implementation aims to be compatible with the huggingface transformers library. It inherits `PreTrainedModel`, so you can use `save_pretrained()`, `from_pretrained()`, `push_to_hub()`, and so on.
 Powered by hf transformers, the model is enabled with different text generation strategies such as beam search and sampling strategies such as top-k sampling.
 
 A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini-test.
 Be aware that this model was trained for image captioning on the conceptual captions dataset.
-You can find a demo of the model in this hf space: https://huggingface.co/spaces/dhansmair/flamingo-cap
+You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-cap" target="blank">this hf space</a>. 
 
 ## Install
-requires python3.8
+(tested with python3.8)
 
 ```bash
 git clone https://github.com/dhansmair/flamingo-mini.git
@@ -24,15 +24,38 @@ pip install .
 from flamingo_mini import FlamingoConfig, FlamingoModel, FlamingoProcessor
 
 # create a model for training
-# for configuration options, see FlamingoConfig
 device = ...
-config = FlamingoConfig()
+config = FlamingoConfig(...)
 model = FlamingoModel(config)
 model.to(device)
-processor = FlamingoProcessor(model.config, device=device)
+processor = FlamingoProcessor(config, device=device)
+```
+### Parameters
+You can specify the architecture by passing the following parameters to FlamingoConfig():  
+*name*: *type* = *default value*
+```
+lm: str = 'gpt2'                    # select language model. Possible values: gpt2, gpt2-*, facebook/opt-*
+clip_model_type: str = 'openai/clip-vit-base-patch32'      
+                                    # vision encoder. Possible other: openai/clip-vit-large-patch14
+dim: int = 1024                     # length of a language token, depends on used language model
+dim_visual: int = 768               # length of a visual feature, depends on the vision encoder
+xattn_every: int = 1                # frequency of interleaved xattn layers
+xattn_dim_head: int = 64
+xattn_heads: int = 8
+xattn_ff_mult: int = 4
+xattn_act: str = 'gelu'             # activation function in the xattn FFW blocks. Possible values: gelu, sqrelu, relu
+
+resampler_depth: int = 6            # number of layers of the perceiver resampler
+resampler_dim_head: int = 64
+resampler_heads: int = 8
+resampler_num_latents: int = 64     # number of queries
+resampler_num_time_embeds: int = 4
+resampler_ff_mult: int = 4
+resampler_act: str = 'gelu'         # activation function in the resampler FFW blocks. Possible values: gelu, sqrelu, relu
+
 ```
 
-### load the pretrained image-captioning model
+### Load pretrained image-captioning model
 ```python
 model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini-test')
 processor = FlamingoProcessor(model.config)
@@ -47,4 +70,17 @@ A complete example is provided in `examples/image_captioning.py`.
     author  = {Jean-Baptiste Alayrac et al},
     year    = {2022}
 }
+
+@inproceedings{wolf-etal-2020-transformers,
+    title = "Transformers: State-of-the-Art Natural Language Processing",
+    author = "Thomas Wolf and Lysandre Debut and Victor Sanh and Julien Chaumond and Clement Delangue and Anthony Moi and Pierric Cistac and Tim Rault and Rémi Louf and Morgan Funtowicz and Joe Davison and Sam Shleifer and Patrick von Platen and Clara Ma and Yacine Jernite and Julien Plu and Canwen Xu and Teven Le Scao and Sylvain Gugger and Mariama Drame and Quentin Lhoest and Alexander M. Rush",
+    booktitle = "Proceedings of the 2020 Conference on Empirical Methods in Natural Language Processing: System Demonstrations",
+    month = oct,
+    year = "2020",
+    address = "Online",
+    publisher = "Association for Computational Linguistics",
+    url = "https://www.aclweb.org/anthology/2020.emnlp-demos.6",
+    pages = "38--45"
+}
+
 ```
