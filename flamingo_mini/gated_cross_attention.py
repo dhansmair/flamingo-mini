@@ -13,12 +13,12 @@ from .utils import FeedForward
 
 class MaskedCrossAttention(nn.Module):
     def __init__(
-            self,
-            *,
-            dim,
-            dim_visual,
-            dim_head=64,
-            heads=8
+        self,
+        *,
+        dim,
+        dim_visual,
+        dim_head=64,
+        heads=8
     ):
         """
         :param dim:      d_token, d_visual  dimensionality of language- and visual tokens
@@ -110,14 +110,14 @@ class MaskedCrossAttention(nn.Module):
 
 class GatedCrossAttentionBlock(nn.Module):
     def __init__(
-            self,
-            *,
-            dim,
-            dim_visual,
-            dim_head=64,
-            heads=8,
-            ff_mult=4,
-            act='gelu'
+        self,
+        *,
+        dim,
+        dim_visual,
+        dim_head=64,
+        heads=8,
+        ff_mult=4,
+        act='gelu'
     ):
         """
         :param dim:      d_token, d_visual
@@ -198,23 +198,27 @@ class ModifiedLMBlock(nn.Module):
         self.media_locations = media_locations
         self.xattn_layer_past = xattn_layer_past
         
-    def forward(self,
-                hidden_states: Optional[Tuple[torch.FloatTensor]],
-                use_cache: Optional[bool] = False,
-                **kvargs):
+    def forward(
+        self,
+        hidden_states: Optional[Tuple[torch.FloatTensor]],
+        use_cache: Optional[bool] = False,
+        **kwargs
+    ):
         """
         This forward function mimics forward() of GPT2Block, so it has the same input and output.
         """
         
         # pass through xattn
-        hidden_states, kv = self.xattn_block(y=hidden_states, 
-                                             x=self.visual_features, 
-                                             media_locations=self.media_locations,
-                                             previous_kv=self.xattn_layer_past,
-                                             output_kv=use_cache)
+        hidden_states, kv = self.xattn_block(
+            y=hidden_states, 
+            x=self.visual_features, 
+            media_locations=self.media_locations,
+            previous_kv=self.xattn_layer_past,
+            output_kv=use_cache
+        )
         self.kv_output = kv
         
         # pass through original LM layer
-        return self.lm_block(hidden_states, use_cache=use_cache, **kvargs)
+        return self.lm_block(hidden_states, use_cache=use_cache, **kwargs)
         
     

@@ -33,14 +33,15 @@ class FlamingoBaseModel(PreTrainedModel):
         self.lm: PreTrainedModel = None
         self.lm_head: nn.Linear = None
         self.resampler: PerceiverResampler = PerceiverResampler(
-                dim=config.dim_visual,
-                depth=config.resampler_depth,
-                dim_head = config.resampler_dim_head,
-                heads = config.resampler_heads,
-                num_latents = config.resampler_num_latents,
-                num_time_embeds=config.resampler_num_time_embeds,
-                ff_mult=config.resampler_ff_mult,
-                act=config.resampler_act,)
+            dim=config.dim_visual,
+            depth=config.resampler_depth,
+            dim_head = config.resampler_dim_head,
+            heads = config.resampler_heads,
+            num_latents = config.resampler_num_latents,
+            num_time_embeds=config.resampler_num_time_embeds,
+            ff_mult=config.resampler_ff_mult,
+            act=config.resampler_act,
+        )
 
         self.modified_layers: List[ModifiedLMBlock] = []
     
@@ -53,13 +54,15 @@ class FlamingoBaseModel(PreTrainedModel):
         
         for i, lm_layer in enumerate(lm_layers):
             if i % self.config.xattn_every == 0:
-                modified_layer = ModifiedLMBlock(lm_layer,
-                                                 dim=self.config.dim,
-                                                 dim_visual = self.config.dim_visual,
-                                                 dim_head=self.config.xattn_dim_head,
-                                                 heads=self.config.xattn_heads,
-                                                 ff_mult=self.config.xattn_ff_mult,
-                                                 act=self.config.xattn_act)
+                modified_layer = ModifiedLMBlock(
+                    lm_layer,
+                    dim=self.config.dim,
+                    dim_visual = self.config.dim_visual,
+                    dim_head=self.config.xattn_dim_head,
+                    heads=self.config.xattn_heads,
+                    ff_mult=self.config.xattn_ff_mult,
+                    act=self.config.xattn_act
+                )
                 modified_layers.append(modified_layer)
                 lm_layers[i] = modified_layer
                 
@@ -102,15 +105,17 @@ class FlamingoBaseModel(PreTrainedModel):
             
         return dict_trainable
 
-    def forward(self, 
-                input_ids: torch.LongTensor,
-                attention_mask: Optional[torch.LongTensor] = None,
-                media_locations: Optional[torch.BoolTensor] = None,
-                visual_features: Optional[torch.FloatTensor] = None,
-                use_cache: bool = False,
-                past_key_values: Optional[tuple] = None,
-                return_dict: bool = True,
-                **kwargs) -> CausalLMOutputWithPast:
+    def forward(
+        self, 
+        input_ids: torch.LongTensor,
+        attention_mask: Optional[torch.LongTensor] = None,
+        media_locations: Optional[torch.BoolTensor] = None,
+        visual_features: Optional[torch.FloatTensor] = None,
+        use_cache: bool = False,
+        past_key_values: Optional[tuple] = None,
+        return_dict: bool = True,
+        **kwargs
+    ) -> CausalLMOutputWithPast:
         """ Flamingo forward pass 
         
         :param token_ids:       LongTensor (n_batch, n_tokens)
@@ -148,12 +153,14 @@ class FlamingoBaseModel(PreTrainedModel):
             xattn.condition(visual_features, media_locations, layer_past)
             
         # pass through LM
-        out: BaseModelOutputWithPast = self.lm(input_ids=input_ids, 
-                                               attention_mask=attention_mask,
-                                               use_cache=use_cache,
-                                               past_key_values=lm_past_key_values, 
-                                               return_dict=True,
-                                               **kwargs)
+        out: BaseModelOutputWithPast = self.lm(
+            input_ids=input_ids, 
+            attention_mask=attention_mask,
+            use_cache=use_cache,
+            past_key_values=lm_past_key_values, 
+            return_dict=True,
+            **kwargs
+        )
         
         logits = self.lm_head(out.last_hidden_state)
         
@@ -176,15 +183,6 @@ class FlamingoBaseModel(PreTrainedModel):
 
 
 class FlamingoGPT2(FlamingoBaseModel):
-    """
-    new implementation of the flamingo class.
-    The implementation of the underlying language model does not need to be altered. 
-    Instead, a wrapped LM instance is slighly modified:
-    - it's token embeddings are extended with an additional trainable embedding
-      for the <EOC> token
-    - LM layers are replaced with wrappers to the original LM layers, which also
-      contain the gated cross-attention layers.
-    """
     config_class = FlamingoConfig
     
     def __init__(self, config: FlamingoConfig):
@@ -200,18 +198,6 @@ class FlamingoGPT2(FlamingoBaseModel):
         
     
 class FlamingoOPT(FlamingoBaseModel):
-    """
-    new implementation of the flamingo class.
-    The implementation of the underlying language model does not need to be altered. 
-    Instead, a wrapped LM instance is slighly modified:
-    - it's token embeddings are extended with an additional trainable embedding
-      for the <EOC> token
-    - LM layers are replaced with wrappers to the original LM layers, which also
-      contain the gated cross-attention layers.
-    
-    This way, the modified LM can be used the same way as the original.
-    Plus, it should be easier to adopt the Flamingo model to other LMs like OPT.
-    """
     config_class = FlamingoConfig
     
     def __init__(self, config: FlamingoConfig):
@@ -270,12 +256,14 @@ class FlamingoModel(PreTrainedModel):
     def forward(self, *args, **kwargs):
         return self.flamingo(*args, **kwargs)
 
-    def prepare_inputs_for_generation(self, 
-                                      input_ids: torch.LongTensor, 
-                                      visual_features: torch.FloatTensor = None, 
-                                      media_locations: torch.LongTensor = None, 
-                                      past=None, 
-                                      **kwargs) -> Dict[str, Any]:
+    def prepare_inputs_for_generation(
+        self, 
+        input_ids: torch.LongTensor, 
+        visual_features: torch.FloatTensor = None, 
+        media_locations: torch.LongTensor = None, 
+        past=None, 
+        **kwargs
+    ) -> Dict[str, Any]:
         """ hf specific function. Overridden from PreTrainedModel for text generation purposes.
         
         for beam search, input_ids is replicated times the number of beams. 
@@ -326,12 +314,15 @@ class FlamingoModel(PreTrainedModel):
         return xattn_past_beam, lm_past_beam
     
     @torch.no_grad()
-    def generate_captions(self, 
-                          processor: FlamingoProcessor, 
-                          visual_features: torch.FloatTensor= None, 
-                          images: Union[Image.Image, List[Image.Image]] = None,
-                          prompt="<image>", max_length=150, num_beams=1,
-                          ):
+    def generate_captions(
+        self, 
+        processor: FlamingoProcessor, 
+        visual_features: Optional[torch.FloatTensor] = None, 
+        images: Union[Image.Image, List[Image.Image]] = None,
+        prompt: str = "<image>", 
+        max_length: int = 150, 
+        num_beams: int = 1
+    ):
         """
         helper utility for image captioning.
         prompt is replicated for all batches.
@@ -358,17 +349,19 @@ class FlamingoModel(PreTrainedModel):
         media_locations = repeat(media_locations[0], 'l -> n l', n=batch_size)
         attention_mask = repeat(attention_mask[0], 'l -> n l', n=batch_size)
             
-        out_ids = self.generate(inputs=input_ids,
-                              visual_features=visual_features,
-                              media_locations=media_locations,
-                              attention_mask=attention_mask,
-                              num_beams=num_beams,
-                              early_stopping=True,
-                              use_cache=True,
-                              bos_token_id=self.flamingo.lm.config.bos_token_id,
-                              eos_token_id=self.flamingo.lm.config.eos_token_id,
-                              pad_token_id=self.flamingo.lm.config.eos_token_id,
-                              max_length=max_length)
+        out_ids = self.generate(
+            inputs=input_ids,
+            visual_features=visual_features,
+            media_locations=media_locations,
+            attention_mask=attention_mask,
+            num_beams=num_beams,
+            early_stopping=True,
+            use_cache=True,
+            bos_token_id=self.flamingo.lm.config.bos_token_id,
+            eos_token_id=self.flamingo.lm.config.eos_token_id,
+            pad_token_id=self.flamingo.lm.config.eos_token_id,
+            max_length=max_length
+        )
         
         captions = processor.tokenizer.batch_decode(out_ids, skip_special_tokens=True)
         captions = [processor.remove_tags(t) for t in captions]

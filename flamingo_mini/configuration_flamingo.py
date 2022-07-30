@@ -16,26 +16,28 @@ class FlamingoConfig(PretrainedConfig):
     were passed in separate dictionaries. So the two are kept for backwards compatibility.
     """
     
-    def __init__(self,
-                 lm: str = 'gpt2',
-                 clip_model_type: str = 'openai/clip-vit-base-patch32',
-                 dim: int = 1024,
-                 dim_visual: int = 768,
-                 xattn_every: int = 1,
-                 xattn_dim_head: int = 64,
-                 xattn_heads: int = 8,
-                 xattn_ff_mult: int = 4,
-                 xattn_act: str = 'gelu',
-                 xattn = None,
-                 resampler_depth: int = 6,
-                 resampler_dim_head: int = 64,
-                 resampler_heads: int = 8 ,
-                 resampler_num_latents: int = 64,
-                 resampler_num_time_embeds: int = 4,
-                 resampler_ff_mult: int = 4,
-                 resampler_act: str = 'gelu',
-                 resampler = None,
-                 **kwargs):
+    def __init__(
+        self,
+        lm: str = 'gpt2',
+        clip_model_type: str = 'openai/clip-vit-base-patch32',
+        dim: int = 1024,
+        dim_visual: int = 768,
+        xattn_every: int = 1,
+        xattn_dim_head: int = 64,
+        xattn_heads: int = 8,
+        xattn_ff_mult: int = 4,
+        xattn_act: str = 'gelu',
+        xattn = None,
+        resampler_depth: int = 6,
+        resampler_dim_head: int = 64,
+        resampler_heads: int = 8 ,
+        resampler_num_latents: int = 64,
+        resampler_num_time_embeds: int = 4,
+        resampler_ff_mult: int = 4,
+        resampler_act: str = 'gelu',
+        resampler = None,
+        **kwargs
+    ):
         self.lm = lm
         self.clip_model_type = clip_model_type
         self.dim = dim
