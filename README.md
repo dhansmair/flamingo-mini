@@ -5,7 +5,7 @@ The implementation aims to be compatible with the huggingface transformers libra
 The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.
 
 A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini-test.
-Be aware that this model was trained for image captioning on the conceptual captions dataset.
+Be aware that this model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset.
 You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-cap" target="blank">this hf space</a>. 
 
 ## Install
