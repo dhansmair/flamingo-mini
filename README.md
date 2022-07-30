@@ -1,7 +1,5 @@
 # Flamingo mini
-*work in progress*
-Implementation of the flamingo vision-language model by deepmind, based on Lucidrains [insert link]
-implementation of the perceiver resampler and the gated cross-attention layers. 
+Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model">Flamingo</a> vision-language model by deepmind, based on Lucidrains https://github.com/lucidrains/flamingo-pytorch implementation of the perceiver resampler and the gated cross-attention layers. 
 
 - Aims to be compatible with the huggingface transformers library.
 - There are two versions available at the moment, based on GPT-2 and OPT.
