@@ -3,13 +3,12 @@ gated cross-attention layer.
 copied from flamingo-pytorch.
 """
 from typing import Optional, Union, List, Tuple
-from dataclasses import asdict
 import torch
 from torch import nn, einsum, tanh
 from einops import rearrange, repeat
 from einops_exts import rearrange_many
 
-from .utils import exists, FeedForward
+from .utils import FeedForward
 
 
 class MaskedCrossAttention(nn.Module):
@@ -78,7 +77,7 @@ class MaskedCrossAttention(nn.Module):
         # side note: here, text tokens attend to ALL previous visual tokens. If We only want to attend to the
         # one image coming before in the text (like in the flamingo paper),
         # we need to change >= to == at the line where 'text_to_media_mask' is created.
-        if exists(media_locations):
+        if media_locations is not None:
             text_time = media_locations.cumsum(dim=-1) # at each boolean of True, increment the time counter (relative to media time)
             
             # >> David
@@ -125,7 +124,6 @@ class GatedCrossAttentionBlock(nn.Module):
         :param dim_head: dimensionality of q, k, v inside the attention head
         :param heads:    number of attention heads
         :param ff_mult:  factor for the number of inner neurons in the ffw layer
-                        TODO ffw architecture from the original paper
         """
         super().__init__()
         self.attn = MaskedCrossAttention(dim=dim, dim_visual=dim_visual, dim_head=dim_head, heads=heads)
@@ -168,7 +166,7 @@ class ModifiedLMBlock(nn.Module):
     the cached keys and values for the xattn layers need to be retrieved separately from
     the kv_output property.
     
-    (!) This implementation works with gpt2 layers, but hasn't been tested with other LMs yet.
+    (!) This implementation works with GPT-2 and OPT layers, but hasn't been tested with other LMs yet.
     """
     
     def __init__(self,

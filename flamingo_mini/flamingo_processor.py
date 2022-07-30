@@ -1,9 +1,7 @@
 from PIL import Image
 from typing import List, Tuple, Union, Optional
 import torch
-# import numpy as np
 
-# from transformers import CLIPVisionModel, CLIPProcessor, GPT2Tokenizer
 from .configuration_flamingo import FlamingoConfig, is_lm_supported
 from .utils import unzip
 
@@ -19,6 +17,7 @@ class FlamingoProcessor:
                  load_tokenizer: bool = True,
                  load_vision_processor: bool = False,
                  output_captions=False,
+                 device: torch.device = None
                  ):
         
         self.config = config
@@ -26,12 +25,14 @@ class FlamingoProcessor:
         assert is_lm_supported(self.config.lm), 'this language model is not supported.'
         
         self.output_captions = output_captions
+        self.device = device
         
         if load_vision_processor:
             from transformers import CLIPVisionModel, CLIPProcessor
 
             self.vision_processor = CLIPProcessor.from_pretrained(config.clip_model_type)
             self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
+            self.vision_model.to(device)
         else:
             self.vision_processor = None
             self.vision_model = None
@@ -97,7 +98,7 @@ class FlamingoProcessor:
         """
         return self.vision_processor(images=images, return_tensors="pt", padding=True)
 
-    def extract_features(self, images: Union[Image.Image, List[Image.Image]], device=None) -> torch.FloatTensor:
+    def extract_features(self, images: Union[Image.Image, List[Image.Image]]) -> torch.FloatTensor:
         
         if self.vision_processor is None or self.vision_model is None:
             raise ValueError("flamingo processor not initialized with vision processor")
@@ -105,18 +106,16 @@ class FlamingoProcessor:
         if isinstance(images, Image.Image):
             images = [images]
         
-        pixels = self.preprocess_images(images)
-        pixels = pixels['pixel_values']
-        pixels = pixels.to(device)
+        pixels = self.vision_processor(images=images, return_tensors="pt", padding=True)
+        pixels = pixels['pixel_values'].to(self.device)
         features = self.vision_model(pixels)
         features = features.last_hidden_state
         
         return features
     
     def collate_fn(self, batch):
-        """ assumes the data is coming from PretokenizedConceptualDS
-        
-        collate_fn turns a list of features and a list of tokenized captions.
+        """ 
+        intended to be used with a dataloader. The underlying dataset should return a tuple (features, tokenized_captions, captions).
         it returns a tensor of features, a tensor of tokenized captions (padded), attention mask, and media_locations
         """
         

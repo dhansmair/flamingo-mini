@@ -134,7 +134,6 @@ class PerceiverResampler(nn.Module):
         self.latents = nn.Parameter(torch.randn(num_latents, dim))
 
         # the time positional embeddings are learnable parameters as well?
-        # TODO why time pos emb? it should be just a time embedding for frames of video clips?
         self.time_pos_emb = nn.Parameter(torch.randn(num_time_embeds, 1, dim))
 
         self.layers = nn.ModuleList([])

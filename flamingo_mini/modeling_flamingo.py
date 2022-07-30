@@ -1,6 +1,6 @@
 from __future__ import annotations
-from dataclasses import asdict
-from typing import Tuple, Optional, List, Dict, Any
+from typing import Tuple, Optional, List, Dict, Any, Union
+from PIL import Image
 
 import torch
 import torch.nn as nn
@@ -12,7 +12,6 @@ from .configuration_flamingo import FlamingoConfig, is_lm_supported
 from .flamingo_processor import FlamingoProcessor
 from .perceiver_resampler import PerceiverResampler
 from .gated_cross_attention import ModifiedLMBlock
-from .utils import add_column
 
 
 _TRAINABLE_STATE_DICT_KEYWORDS = ('resampler', 'xattn_block', 'lm_head')
@@ -329,13 +328,22 @@ class FlamingoModel(PreTrainedModel):
     @torch.no_grad()
     def generate_captions(self, 
                           processor: FlamingoProcessor, 
-                          visual_features: torch.FloatTensor, 
+                          visual_features: torch.FloatTensor= None, 
+                          images: Union[Image.Image, List[Image.Image]] = None,
                           prompt="<image>", max_length=150, num_beams=1,
-                          use_fast=False):
+                          ):
         """
         helper utility for image captioning.
         prompt is replicated for all batches.
         """
+        if images is not None:
+            if isinstance(images, Image.Image):
+                images = [images]
+                
+            assert visual_features is None, "you can only pass either images or visual features to generate_captions()!"
+            visual_features = processor.extract_features(images)
+
+        assert visual_features is not None, "you must pass either images or visual features to generate_captions()!"
         
         if visual_features.ndim == 2:
             visual_features = rearrange(visual_features, 'f d -> 1 1 1 f d') 
@@ -349,27 +357,18 @@ class FlamingoModel(PreTrainedModel):
         input_ids = repeat(input_ids[0], 'l -> n l', n=batch_size)
         media_locations = repeat(media_locations[0], 'l -> n l', n=batch_size)
         attention_mask = repeat(attention_mask[0], 'l -> n l', n=batch_size)
-        
-        if use_fast:
-            out_ids = self.greedy_search_fast(input_ids, 
-                                              media_locations, 
-                                              attention_mask, 
-                                              visual_features, 
-                                              max_token_length=max_length, 
-                                              use_cache=True)
             
-        else:
-            out_ids = self.generate(inputs=input_ids,
-                                  visual_features=visual_features,
-                                  media_locations=media_locations,
-                                  attention_mask=attention_mask,
-                                  num_beams=num_beams,
-                                  early_stopping=True,
-                                  use_cache=True,
-                                  bos_token_id=self.flamingo.lm.config.bos_token_id,
-                                  eos_token_id=self.flamingo.lm.config.eos_token_id,
-                                  pad_token_id=self.flamingo.lm.config.eos_token_id,
-                                  max_length=max_length)
+        out_ids = self.generate(inputs=input_ids,
+                              visual_features=visual_features,
+                              media_locations=media_locations,
+                              attention_mask=attention_mask,
+                              num_beams=num_beams,
+                              early_stopping=True,
+                              use_cache=True,
+                              bos_token_id=self.flamingo.lm.config.bos_token_id,
+                              eos_token_id=self.flamingo.lm.config.eos_token_id,
+                              pad_token_id=self.flamingo.lm.config.eos_token_id,
+                              max_length=max_length)
         
         captions = processor.tokenizer.batch_decode(out_ids, skip_special_tokens=True)
         captions = [processor.remove_tags(t) for t in captions]
