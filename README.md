@@ -59,7 +59,8 @@ processor = FlamingoProcessor(model.config)
 ```
 A complete example is provided in `examples/image_captioning.py`.
 
-### Training
+
+## Training
 *work in progress*  
 A core idea of Flamingo is to reuse existing language model and vision encoder. As such, their weights need to be frozen during flamingo training. Make sure requires_grad is set to False accordingly. FlamingoModel has a `freeze_lm()` method to set that for the language model. Note that in our implementation, this does not freeze the lm_head, as the embedding for the `<EOC>` token needs to be learned.
 
