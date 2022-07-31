@@ -1,9 +1,7 @@
 # Flamingo mini
 Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">Flamingo</a> vision-language model by deepmind, based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers. It utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.
 
-The implementation aims to be compatible with the huggingface transformers library. It inherits `PreTrainedModel`, so you can use methods such as `save_pretrained()`, `from_pretrained()` and `push_to_hub()`. Powered by hf transformers, the model is enabled with different text generation strategies such as beam search and sampling strategies such as top-k sampling.
-The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.
-
+## Demo
 A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini-test.
 Be aware that this model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset.
 You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-cap" target="blank">this hf space</a>. 
@@ -18,6 +16,8 @@ pip install .
 ```
 
 ## Usage
+The implementation aims to be compatible with the Hugging Face transformers library and largely adopts their api. It inherits `PreTrainedModel`, so you can use methods such as `save_pretrained()`, `from_pretrained()` and `push_to_hub()`. Powered by hf transformers, the model is enabled with different text generation strategies such as beam search and sampling strategies such as top-k sampling.
+The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.
 ```python
 from flamingo_mini import FlamingoConfig, FlamingoModel, FlamingoProcessor
 
@@ -30,7 +30,6 @@ processor = FlamingoProcessor(config, device=device)
 ```
 ### Parameters
 You can specify the architecture by passing the following parameters to FlamingoConfig():  
-*name*: *type* = *default value*
 ```
 lm: str = 'gpt2'                    # select language model. Possible values: gpt2, gpt2-*, facebook/opt-*
 clip_model_type: str = 'openai/clip-vit-base-patch32'      
