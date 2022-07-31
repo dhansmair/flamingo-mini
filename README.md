@@ -30,7 +30,7 @@ processor = FlamingoProcessor(config, device=device)
 ```
 ### Parameters
 You can specify the architecture by passing the following parameters to FlamingoConfig():  
-```
+```python
 lm: str = 'gpt2'                    # select language model. Possible values: gpt2, gpt2-*, facebook/opt-*
 clip_model_type: str = 'openai/clip-vit-base-patch32'      
                                     # vision encoder. Possible other: openai/clip-vit-large-patch14
@@ -59,10 +59,14 @@ processor = FlamingoProcessor(model.config)
 ```
 A complete example is provided in `examples/image_captioning.py`.
 
-### How can I use my own Language Model?
-The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.  
+### Training
+*work in progress*  
+A core idea of Flamingo is to reuse existing language model and vision encoder. As such, their weights need to be frozen during flamingo training. Make sure requires_grad is set to False accordingly. FlamingoModel has a `freeze_lm()` method to set that for the language model. Note that in our implementation, this does not freeze the lm_head, as the embedding for the `<EOC>` token needs to be learned.
 
-An incomplete UML diagram of this repository:
+### Using a different language model
+The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method.
+
+A high level overview of this repository:
 
 ```mermaid
 classDiagram
@@ -94,11 +98,17 @@ class FlamingoModel {
 class FlamingoBaseModel {
   <<abstract>>
   FlamingoConfig config
+  Linear lm_head
   forward()
+  _init_layers()
   ...
 }
-class FlamingoOPT
-class FlamingoGPT2
+class FlamingoOPT {
+  OPTModel lm
+}
+class FlamingoGPT2 {
+  GPT2Model lm
+}
 FlamingoModel *-- FlamingoBaseModel
 FlamingoBaseModel <|-- FlamingoOPT
 FlamingoBaseModel <|-- FlamingoGPT2
