@@ -61,8 +61,48 @@ A complete example is provided in `examples/image_captioning.py`.
 
 ### How can I use my own Language Model?
 The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.  
-*TODO*
 
+An incomplete UML diagram of this repository:
+
+```mermaid
+classDiagram
+direction LR
+class FlamingoProcessor {
+  FlamingoConfig config
+  GPT2Tokenizer tokenizer
+  CLIPVisionModel vision_model
+  
+  encode_text()
+  extract_features()
+  ...
+}
+class GPT2Tokenizer
+class CLIPVisionModel
+FlamingoProcessor *-- GPT2Tokenizer
+FlamingoProcessor *-- CLIPVisionModel
+
+class FlamingoModel {
+  FlamingoConfig config
+  FlamingoBaseModel flamingo
+  
+  generate()
+  generate_captions()
+  from_pretrained() 
+  ...
+}
+
+class FlamingoBaseModel {
+  <<abstract>>
+  FlamingoConfig config
+  forward()
+  ...
+}
+class FlamingoOPT
+class FlamingoGPT2
+FlamingoModel *-- FlamingoBaseModel
+FlamingoBaseModel <|-- FlamingoOPT
+FlamingoBaseModel <|-- FlamingoGPT2
+```
 
 ## Citations
 
@@ -85,4 +125,32 @@ The FlamingoModel is implemented in such a way that no modification of the under
     pages = "38--45"
 }
 
+@article{radford2019language,
+  title={Language Models are Unsupervised Multitask Learners},
+  author={Radford, Alec and Wu, Jeff and Child, Rewon and Luan, David and Amodei, Dario and Sutskever, Ilya},
+  year={2019}
+}
+
+@misc{zhang2022opt,
+      title={OPT: Open Pre-trained Transformer Language Models}, 
+      author={Susan Zhang and Stephen Roller and Naman Goyal and Mikel Artetxe and Moya Chen and Shuohui Chen and Christopher Dewan and Mona Diab and Xian Li and Xi Victoria Lin and Todor Mihaylov and Myle Ott and Sam Shleifer and Kurt Shuster and Daniel Simig and Punit Singh Koura and Anjali Sridhar and Tianlu Wang and Luke Zettlemoyer},
+      year={2022},
+      eprint={2205.01068},
+      archivePrefix={arXiv},
+      primaryClass={cs.CL}
+}
+
+@article{DBLP:journals/corr/abs-2103-00020,
+  author    = {Alec Radford and Jong Wook Kim and Chris Hallacy and Aditya Ramesh and Gabriel Goh and Sandhini Agarwal and Girish Sastry and Amanda Askell and Pamela Mishkin and Jack Clark and Gretchen Krueger and Ilya Sutskever},
+  title     = {Learning Transferable Visual Models From Natural Language Supervision},
+  journal   = {CoRR},
+  volume    = {abs/2103.00020},
+  year      = {2021},
+  url       = {https://arxiv.org/abs/2103.00020},
+  eprinttype = {arXiv},
+  eprint    = {2103.00020},
+  timestamp = {Thu, 04 Mar 2021 17:00:40 +0100},
+  biburl    = {https://dblp.org/rec/journals/corr/abs-2103-00020.bib},
+  bibsource = {dblp computer science bibliography, https://dblp.org}
+}
 ```
