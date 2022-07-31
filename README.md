@@ -17,7 +17,7 @@ pip install .
 
 ## Usage
 The implementation aims to be compatible with the Hugging Face transformers library and largely adopts their api. It inherits `PreTrainedModel`, so you can use methods such as `save_pretrained()`, `from_pretrained()` and `push_to_hub()`. Powered by hf transformers, the model is enabled with different text generation strategies such as beam search and sampling strategies such as top-k sampling.
-The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.
+
 ```python
 from flamingo_mini import FlamingoConfig, FlamingoModel, FlamingoProcessor
 
@@ -58,6 +58,11 @@ model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini-test')
 processor = FlamingoProcessor(model.config)
 ```
 A complete example is provided in `examples/image_captioning.py`.
+
+### How can I use my own Language Model?
+The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models.  
+*TODO*
+
 
 ## Citations
 
