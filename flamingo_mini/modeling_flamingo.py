@@ -29,21 +29,22 @@ class FlamingoBaseModel(PreTrainedModel):
     def __init__(self, config: FlamingoConfig):
         assert isinstance(config, FlamingoConfig)
         super().__init__(config)
-        self.config: FlamingoConfig = self.config
+        self.config: FlamingoConfig = self.config           # just to enable type hints on self.config
         
-        self.lm: PreTrainedModel = None
-        self.lm_head: nn.Linear = None
+        self.lm: PreTrainedModel = None                     # set in child class
+        self.lm_head: nn.Linear = None                      # set in child class
         self.resampler: PerceiverResampler = PerceiverResampler(
             dim=config.dim_visual,
             depth=config.resampler_depth,
-            dim_head = config.resampler_dim_head,
-            heads = config.resampler_heads,
-            num_latents = config.resampler_num_latents,
+            dim_head=config.resampler_dim_head,
+            heads=config.resampler_heads,
+            num_latents=config.resampler_num_latents,
             num_time_embeds=config.resampler_num_time_embeds,
             ff_mult=config.resampler_ff_mult,
-            act=config.resampler_act,
+            act=config.resampler_act
         )
 
+        # a list of direct references to the augmented lm layers
         self.modified_layers: List[ModifiedLMBlock] = []
     
     def _init_layers(self, lm_layers: nn.ModuleList):
@@ -51,23 +52,23 @@ class FlamingoBaseModel(PreTrainedModel):
         call during init of the subclass.
         careful, this method will modify the LM layers!
         """
-        modified_layers: List[ModifiedLMBlock] = []
+        self.modified_layers: List[ModifiedLMBlock] = []
         
         for i, lm_layer in enumerate(lm_layers):
-            if i % self.config.xattn_every == 0:
-                modified_layer = ModifiedLMBlock(
-                    lm_layer,
-                    dim=self.config.dim,
-                    dim_visual = self.config.dim_visual,
-                    dim_head=self.config.xattn_dim_head,
-                    heads=self.config.xattn_heads,
-                    ff_mult=self.config.xattn_ff_mult,
-                    act=self.config.xattn_act
-                )
-                modified_layers.append(modified_layer)
-                lm_layers[i] = modified_layer
-                
-        self.modified_layers = modified_layers
+            if i % self.config.xattn_every != 0: 
+                continue
+
+            modified_layer = ModifiedLMBlock(
+                lm_layer,
+                dim=self.config.dim,
+                dim_visual=self.config.dim_visual,
+                dim_head=self.config.xattn_dim_head,
+                heads=self.config.xattn_heads,
+                ff_mult=self.config.xattn_ff_mult,
+                act=self.config.xattn_act
+            )
+            self.modified_layers.append(modified_layer)
+            lm_layers[i] = modified_layer
     
     def freeze_lm(self):
         """
@@ -240,16 +241,11 @@ class FlamingoModel(PreTrainedModel):
     
     def __init__(self, config: FlamingoConfig):
         assert isinstance(config, FlamingoConfig)
-        # assert is_lm_supported(config.lm)
         super().__init__(config)
         self.config: FlamingoConfig = self.config
         
         flamingo_class = self._find_flamingo_class(config.lm)
         self.flamingo: FlamingoBaseModel = flamingo_class(config)
-        # if config.lm.startswith('gpt2'):
-        #     self.flamingo = FlamingoGPT2(config)
-        # else:
-        #     self.flamingo = FlamingoOPT(config)
         
     @classmethod
     def is_lm_supported(cls, lm_id: str) -> bool:
