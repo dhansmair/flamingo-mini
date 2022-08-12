@@ -4,11 +4,12 @@ from PIL import Image
 
 import torch
 import torch.nn as nn
+from torch.nn import CrossEntropyLoss
 from einops import rearrange, repeat
 from transformers import GPT2LMHeadModel, GPT2Model, OPTForCausalLM, OPTModel, PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
 
-from .configuration_flamingo import FlamingoConfig, is_lm_supported
+from .configuration_flamingo import FlamingoConfig
 from .flamingo_processor import FlamingoProcessor
 from .perceiver_resampler import PerceiverResampler
 from .gated_cross_attention import ModifiedLMBlock
@@ -114,6 +115,7 @@ class FlamingoBaseModel(PreTrainedModel):
         use_cache: bool = False,
         past_key_values: Optional[tuple] = None,
         return_dict: bool = True,
+        labels: Optional[torch.LongTensor] = None,
         **kwargs
     ) -> CausalLMOutputWithPast:
         """ Flamingo forward pass 
@@ -162,7 +164,7 @@ class FlamingoBaseModel(PreTrainedModel):
             **kwargs
         )
         
-        logits = self.lm_head(out.last_hidden_state)
+        logits: torch.FloatTensor = self.lm_head(out.last_hidden_state)
         
         # collect the past_key_values from the xattn layers
         if use_cache:
@@ -170,10 +172,19 @@ class FlamingoBaseModel(PreTrainedModel):
             for modified_layer in self.modified_layers:
                 xattn_past_key_values.append(modified_layer.kv_output)
                 
-        # TODO implement loss here
+        loss = None
+        if labels is not None:
+            # loss function calculation, inspired by hf implementations
+            # Shift so that tokens < n predict n
+            shift_logits = logits[..., :-1, :].contiguous()     # logits shape (batch, seq_length, #words)
+            shift_labels = labels[..., 1:].contiguous()         # labels shape (batch, seq_length)
+
+            # Flatten the tokens
+            loss_fct = CrossEntropyLoss()
+            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
         
         return CausalLMOutputWithPast(
-            loss=None,
+            loss=loss,
             logits=logits,
             past_key_values=(tuple(xattn_past_key_values), out.past_key_values) if use_cache else None,
             hidden_states=out.hidden_states,
@@ -220,18 +231,36 @@ class FlamingoModel(PreTrainedModel):
     """
     config_class = FlamingoConfig
     
+    # key = prefix of an existing pretrained huggingface transformer language model
+    # value = Flamingo class for the respective language model
+    _LANGUAGE_MODEL_VERSIONS = {
+        'gpt2': FlamingoGPT2,
+        'facebook/opt': FlamingoOPT
+    }
+    
     def __init__(self, config: FlamingoConfig):
         assert isinstance(config, FlamingoConfig)
-        assert is_lm_supported(config.lm)
+        # assert is_lm_supported(config.lm)
         super().__init__(config)
         self.config: FlamingoConfig = self.config
         
-        self.flamingo: FlamingoBaseModel = None
+        flamingo_class = self._find_flamingo_class(config.lm)
+        self.flamingo: FlamingoBaseModel = flamingo_class(config)
+        # if config.lm.startswith('gpt2'):
+        #     self.flamingo = FlamingoGPT2(config)
+        # else:
+        #     self.flamingo = FlamingoOPT(config)
         
-        if config.lm.startswith('gpt2'):
-            self.flamingo = FlamingoGPT2(config)
-        else:
-            self.flamingo = FlamingoOPT(config)
+    @classmethod
+    def is_lm_supported(cls, lm_id: str) -> bool:
+        return any(lm_id.startswith(prefix) for prefix in cls._LANGUAGE_MODEL_VERSIONS.keys())
+            
+    @classmethod
+    def _find_flamingo_class(cls, language_model_id: str):
+        for prefix, flamingo_class in cls._LANGUAGE_MODEL_VERSIONS.items():
+            if language_model_id.startswith(prefix):
+                return flamingo_class
+        raise ValueError(f'unsupported language model {language_model_id}')
 
     def parameters_trainabale(self):
         """ call freeze_fixed_components() first! """
@@ -253,7 +282,7 @@ class FlamingoModel(PreTrainedModel):
     def state_dict_trainable(self):
         return self.flamingo.state_dict_trainable()
             
-    def forward(self, *args, **kwargs):
+    def forward(self, *args, **kwargs) -> CausalLMOutputWithPast:
         return self.flamingo(*args, **kwargs)
 
     def prepare_inputs_for_generation(

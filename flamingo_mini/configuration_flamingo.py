@@ -1,12 +1,13 @@
+from typing import Optional
 from transformers.configuration_utils import PretrainedConfig
 
 
-AVAILABLE_LANGUAGE_MODELS = ('gpt2', 'facebook/opt')
+# AVAILABLE_LANGUAGE_MODELS = ('gpt2', 'facebook/opt')
 AVAILABLE_ACTIVATION_FUNCTIONS = ('sqrelu', 'gelu')
 
 
-def is_lm_supported(lm_name: str) -> bool: 
-    return any(lm_name.startswith(pref) for pref in AVAILABLE_LANGUAGE_MODELS)
+# def is_lm_supported(lm_name: str) -> bool: 
+#     return any(lm_name.startswith(pref) for pref in AVAILABLE_LANGUAGE_MODELS)
 
 
 class FlamingoConfig(PretrainedConfig):
@@ -27,7 +28,7 @@ class FlamingoConfig(PretrainedConfig):
         xattn_heads: int = 8,
         xattn_ff_mult: int = 4,
         xattn_act: str = 'gelu',
-        xattn = None,
+        xattn: Optional[dict] = None,
         resampler_depth: int = 6,
         resampler_dim_head: int = 64,
         resampler_heads: int = 8 ,
@@ -35,7 +36,7 @@ class FlamingoConfig(PretrainedConfig):
         resampler_num_time_embeds: int = 4,
         resampler_ff_mult: int = 4,
         resampler_act: str = 'gelu',
-        resampler = None,
+        resampler: Optional[dict] = None,
         **kwargs
     ):
         self.lm = lm

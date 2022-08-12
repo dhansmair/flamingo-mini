@@ -2,7 +2,7 @@ from PIL import Image
 from typing import List, Tuple, Union, Optional
 import torch
 
-from .configuration_flamingo import FlamingoConfig, is_lm_supported
+from .configuration_flamingo import FlamingoConfig
 from .utils import unzip
 
 
@@ -22,7 +22,7 @@ class FlamingoProcessor:
         
         self.config = config
         
-        assert is_lm_supported(self.config.lm), 'this language model is not supported.'
+        # assert is_lm_supported(self.config.lm), 'this language model is not supported.'
         
         self.output_captions = output_captions
         self.device = device
@@ -98,7 +98,7 @@ class FlamingoProcessor:
         """
         return self.vision_processor(images=images, return_tensors="pt", padding=True)
 
-    def extract_features(self, images: Union[Image.Image, List[Image.Image]]) -> torch.FloatTensor:
+    def extract_features(self, images: Union[Image.Image, List[Image.Image]], to_device: bool = True) -> torch.FloatTensor:
         
         if self.vision_processor is None or self.vision_model is None:
             raise ValueError("flamingo processor not initialized with vision processor")
@@ -107,7 +107,11 @@ class FlamingoProcessor:
             images = [images]
         
         pixels = self.vision_processor(images=images, return_tensors="pt", padding=True)
-        pixels = pixels['pixel_values'].to(self.device)
+        pixels = pixels['pixel_values']
+
+        if to_device:
+            pixels = pixels.to(self.device)
+
         features = self.vision_model(pixels)
         features = features.last_hidden_state
         
