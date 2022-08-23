@@ -70,7 +70,7 @@ A core idea of Flamingo is to reuse off-the-shelf language model and vision enco
 The architecture *might* be compatible with the <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, though I haven't tested that.
 
 ### Using a different language model
-The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method.
+The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method. If you want to use a different tokenizer or vision encoder, you will need to implement a new processor similar to FlamingoProcessor.
 
 A high level overview of this repository:
 
