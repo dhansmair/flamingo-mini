@@ -1,6 +1,10 @@
 # Flamingo mini
 Implementation of the deepmind <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">Flamingo</a> vision-language model, which equips an existing language model with the capability to understand visual data such as images or videos. The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.
 
+- [ ] provide simple training script
+- [ ] create chatting demo
+
+
 ## Demo
 A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini-test. You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-cap" target="blank">this hf space</a>.
 Disclaimer: This model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset. In contrast, Deepmind's original flamingo models have been trained on huge interleaved image-text datasets which are not publicly accessible. Because of that, our model does not have the same few-shot capabilities, nor the exciting chatting abilities as the original. 
