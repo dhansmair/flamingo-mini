@@ -6,7 +6,7 @@ Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-t
 
 
 ## Demo
-A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini-test. You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-cap" target="blank">this hf space</a>.
+A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini. You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-mini-cap" target="blank">this hf space</a>.
 Disclaimer: This model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset. In contrast, Deepmind's original flamingo models have been trained on huge interleaved image-text datasets which are not publicly accessible. Because of that, our model does not have the same few-shot capabilities, nor the exciting chatting abilities as the original. 
  
 
@@ -58,7 +58,7 @@ resampler_act: str = 'gelu'         # activation function in the resampler FFW b
 
 ### Load pretrained image-captioning model
 ```python
-model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini-test')
+model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini')           # or flamingo-tiny
 processor = FlamingoProcessor(model.config)
 ```
 A complete example is provided in `examples/image_captioning.py`.
