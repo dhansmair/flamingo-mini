@@ -65,7 +65,8 @@ class FlamingoBaseModel(PreTrainedModel):
                 dim_head=self.config.xattn_dim_head,
                 heads=self.config.xattn_heads,
                 ff_mult=self.config.xattn_ff_mult,
-                act=self.config.xattn_act
+                act=self.config.xattn_act,
+                n_visual=self.config.resampler_num_latents
             )
             self.modified_layers.append(modified_layer)
             lm_layers[i] = modified_layer
@@ -147,10 +148,8 @@ class FlamingoBaseModel(PreTrainedModel):
             visual_features = rearrange(visual_features, 'b N T v d -> (b N) T v d')
             visual_features = self.resampler(visual_features)
             visual_features = rearrange(visual_features, '(b N) q d -> b N q d', b=n_batch)
-            assert visual_features.ndim == 4
             
-        # condition xattn layers with the visual features
-        # TODO if layer_past is not None, I can ignore the visual features
+        # condition xattn layers
         for i, xattn in enumerate(self.modified_layers):
             layer_past = None if xattn_past_key_values is None else xattn_past_key_values[i]
             xattn.condition(visual_features, media_locations, layer_past)

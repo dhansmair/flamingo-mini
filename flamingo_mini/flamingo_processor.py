@@ -12,25 +12,23 @@ class FlamingoProcessor:
     Wrapper around a transformer GPT-2 tokenizer and a clip processor.
     """
 
-    def __init__(self,
-                 config: FlamingoConfig,
-                 load_tokenizer: bool = True,
-                 load_vision_processor: bool = False,
-                 output_captions=False,
-                 device: torch.device = None
-                 ):
-        
+    def __init__(
+        self,
+        config: FlamingoConfig,
+        device: torch.device = None,
+        load_tokenizer: bool = True,
+        load_vision_processor: bool = False,
+        output_captions: bool = False
+    ):
         self.config = config
-        
-        # assert is_lm_supported(self.config.lm), 'this language model is not supported.'
-        
-        self.output_captions = output_captions
         self.device = device
+        self.output_captions = output_captions
         
         if load_vision_processor:
-            from transformers import CLIPVisionModel, CLIPProcessor
+            from transformers import CLIPVisionModel
+            from transformers.models.clip.feature_extraction_clip import CLIPFeatureExtractor
 
-            self.vision_processor = CLIPProcessor.from_pretrained(config.clip_model_type)
+            self.vision_processor = CLIPFeatureExtractor.from_pretrained(config.clip_model_type)
             self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
             self.vision_model.to(device)
         else:
@@ -112,10 +110,7 @@ class FlamingoProcessor:
         if to_device:
             pixels = pixels.to(self.device)
 
-        features = self.vision_model(pixels)
-        features = features.last_hidden_state
-        
-        return features
+        return self.vision_model(pixels).last_hidden_state
     
     def collate_fn(self, batch):
         """ 
