@@ -257,7 +257,7 @@ class FlamingoModel(PreTrainedModel):
                 return flamingo_class
         raise ValueError(f'unsupported language model {language_model_id}')
 
-    def parameters_trainabale(self):
+    def parameters_trainable(self):
         """ call freeze_fixed_components() first! """
         return filter(lambda p: p.requires_grad, self.parameters())
     
