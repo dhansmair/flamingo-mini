@@ -1,10 +1,14 @@
 # Flamingo mini
-Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">Flamingo</a> vision-language model by deepmind, based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers. It utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.
+Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">deepmind  Flamingo</a> vision-language model, which equips an existing language model with the capability to understand visual data such as images or videos. The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.
+
+- [ ] provide simple training script
+- [ ] create chatting demo
+
 
 ## Demo
-A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini-test.
-Be aware that this model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset.
-You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-cap" target="blank">this hf space</a>. 
+A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini. You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-mini-cap" target="blank">this hf space</a>.
+Disclaimer: This model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset. In contrast, Deepmind's original flamingo models have been trained on huge interleaved image-text datasets which are not publicly accessible. Because of that, our model does not have the same few-shot capabilities, nor the exciting chatting abilities as the original. 
+ 
 
 ## Install
 (tested with python3.8)
@@ -54,7 +58,7 @@ resampler_act: str = 'gelu'         # activation function in the resampler FFW b
 
 ### Load pretrained image-captioning model
 ```python
-model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini-test')
+model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini')           # or flamingo-tiny
 processor = FlamingoProcessor(model.config)
 ```
 A complete example is provided in `examples/image_captioning.py`.
@@ -62,10 +66,11 @@ A complete example is provided in `examples/image_captioning.py`.
 
 ## Training
 *work in progress*  
-A core idea of Flamingo is to reuse existing language model and vision encoder. As such, their weights need to be frozen during flamingo training. Make sure requires_grad is set to False accordingly. FlamingoModel has a `freeze_lm()` method to set that for the language model. Note that in our implementation, this does not freeze the lm_head, as the embedding for the `<EOC>` token needs to be learned.
+A core idea of Flamingo is to reuse off-the-shelf language model and vision encoder. As such, their weights are frozen during flamingo training, and only the perceiver resampler and the gated cross-attention layers are updated. Make sure requires_grad is set to False accordingly. FlamingoModel has a `freeze_lm()` method to set that for the language model. Note that in our implementation, this does not freeze the lm_head, as the embedding for the `<EOC>` token needs to be learned.  
+The architecture *might* be compatible with the <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, though I haven't tested that.
 
 ### Using a different language model
-The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method.
+The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method. If you want to use a different tokenizer or vision encoder, you will need to implement a new processor similar to FlamingoProcessor.
 
 A high level overview of this repository:
 
