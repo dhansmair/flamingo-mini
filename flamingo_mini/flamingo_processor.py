@@ -116,6 +116,8 @@ class FlamingoProcessor:
         """ 
         intended to be used with a dataloader. The underlying dataset should return a tuple (features, tokenized_captions, captions).
         it returns a tensor of features, a tensor of tokenized captions (padded), attention mask, and media_locations
+        
+        TODO experiment specific functionality, remove from flamingo processor
         """
         
         # a list of features, and a list of tensors of different length

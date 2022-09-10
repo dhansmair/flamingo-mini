@@ -75,7 +75,9 @@ class FlamingoBaseModel(PreTrainedModel):
         """
         set requires_grad = False for all components of the LM.
         (!) in our implementation, lm_head is kept trainable and only 
-        initialized from lm_head of GPT2LMHeadModel.
+        initialized from lm_head of GPT2LMHeadModel / OPTForCausalLM
+
+        TODO do not freeze the token embeddings!
         """
         for param in self.lm.parameters():
             param.requires_grad = False
@@ -85,6 +87,7 @@ class FlamingoBaseModel(PreTrainedModel):
 
         for param in self.resampler.parameters():
             param.requires_grad = True
+            
 
         for xattn in self.modified_layers:
             for param in xattn.xattn_block.parameters():
@@ -95,10 +98,13 @@ class FlamingoBaseModel(PreTrainedModel):
             param.requires_grad = True
     
     def state_dict_trainable(self) -> Dict[str, torch.Tensor]:
-        """
-        not precisely right, wte consists of 50257 non-trainable and 1 trainable embedding (for <EOC> token)
-        wte.weight will contain both. Not a problem as long as this function is only used to store the trainable
-        model components
+        """obtain a state dict of only the trainable parameters of the model.
+
+        FIXME this method does not include the token embedding matrix. However it should be
+            part of the trainable state dict, since the embedding for the added <EOC> token
+            needs to be learned.
+            for OPT, it is stored in lm.decoder.embed_tokens
+            for GPT2, it is stored in wte
         """
         dict_trainable = {}
         
@@ -109,7 +115,7 @@ class FlamingoBaseModel(PreTrainedModel):
         return dict_trainable
 
     def forward(
-        self, 
+        self,
         input_ids: torch.LongTensor,
         attention_mask: Optional[torch.LongTensor] = None,
         media_locations: Optional[torch.BoolTensor] = None,
@@ -120,19 +126,33 @@ class FlamingoBaseModel(PreTrainedModel):
         labels: Optional[torch.LongTensor] = None,
         **kwargs
     ) -> CausalLMOutputWithPast:
-        """ Flamingo forward pass 
+        """Flamingo forward pass
         
-        :param token_ids:       LongTensor (n_batch, n_tokens)
-        :param attention_mask:  LongTensor (n_batch, n_tokens)
-        :param media_locations: BoolTensor (n_batch, n_tokens) 
-            every 'True' value marks the beginning of a new media location, 
-            i.e. marks the '<'-token of '<image>' in the original sequence.
-
-        :param visual_features: FloatTensor (n_batch, n_images, n_frames, n_features, dim_feature)
-            if resampled_visual_features are given, visual_features are ignored. This is useful for text generation, because during autoregressive generation 
-            The output of the perceiver resampler will be the same while a sequence is generated.
-        :param resampled_visual_features: Tensor (n_batch, n_image, n_queries, dim_feature)
+        Most of the parameters are inspired by huggingface language model implementations, so this doc may be informative:
+        https://huggingface.co/docs/transformers/model_doc/gpt2#transformers.GPT2Model.forward
+        
+        Args:
+            input_ids (LongTensor):         shape (n_batch, n_tokens). the tokenized input text
+            attention_mask (LongTensor):    shape (n_batch, n_tokens). 
+                Mask as produced by the tokenizer. Required when a batch of input strings are tokenized and thus padded at the end.
+                Then this will indicate the locations of 'real' tokens vs. the location of 'pad' tokens.
+                TODO why is this a LongTensor and not a BoolTensor?
+            media_locations (BoolTensor):   shape (n_batch, n_tokens).
+                indicates the locations of the starts of the <image> tags beginning, i.e. the location of the token representing '<'
+            visual_features (FloatTensor):  shape (n_batch, n_images, n_frames, n_features, dim_feature).
+            use_cache (bool): whether to return the inner keys and values. Used to speed up text generation at inference. defaults to False
+            past_key_values (tuple): tuple of past_key_values of (1) the xattn layers (2) the language model
+            return_dict (bool): Whether to return a dictionary. Right now, only dicts are supported, so this must be set to True. Defaults to True.
+            labels (LongTensor): 
+                It is possible to pass the exact value as input_ids also as labels. If present, the output will contain a CE loss of the next token prediction.
+                optional, defaults to None
+            **kwargs
+        
+        Returns:
+            (CausalLMOutputWithPast): an object containing all the useful stuff. Refer to hf documentation.
+        
         """
+
         assert return_dict == True
 
         if past_key_values is None:
@@ -190,7 +210,6 @@ class FlamingoBaseModel(PreTrainedModel):
             hidden_states=out.hidden_states,
             attentions=out.attentions,
         )
-        
 
 
 class FlamingoGPT2(FlamingoBaseModel):
@@ -224,10 +243,11 @@ class FlamingoOPT(FlamingoBaseModel):
         
 
 class FlamingoModel(PreTrainedModel):
-    """
-    wrapper class for a FlamingoBase decending model (FlamingoGPT2 or FlamingoOPT)
+    """wrapper class for a FlamingoBase decending model (FlamingoGPT2 or FlamingoOPT)
     
-    composition > inheritance
+    A generic flamingo interface that is independent of the underlying LM. Most of the methods are just forwarding to the actual model.
+    This class implements prepare_inputs_for_generation() and reorder_cache(), which are required to utilize hf text generation methods.
+    It also has a generate_captions() utility that can be used to create a caption for an image.
     """
     config_class = FlamingoConfig
     
@@ -239,9 +259,7 @@ class FlamingoModel(PreTrainedModel):
     }
     
     def __init__(self, config: FlamingoConfig):
-        assert isinstance(config, FlamingoConfig)
         super().__init__(config)
-        self.config: FlamingoConfig = self.config
         
         flamingo_class = self._find_flamingo_class(config.lm)
         self.flamingo: FlamingoBaseModel = flamingo_class(config)
@@ -258,7 +276,11 @@ class FlamingoModel(PreTrainedModel):
         raise ValueError(f'unsupported language model {language_model_id}')
 
     def parameters_trainable(self):
-        """ call freeze_fixed_components() first! """
+        """Access the trainable parameters, e.g. useful for the optimizer and gradient clipping. 
+
+        example: optimizer = AdamW(model.parameters_trainable(), lr=args.lr)
+        make sure to call freeze_lm() first! 
+        """
         return filter(lambda p: p.requires_grad, self.parameters())
     
     def freeze_lm(self):
@@ -268,6 +290,7 @@ class FlamingoModel(PreTrainedModel):
         self.flamingo.unfreeze_lm() 
         
     def num_params(self, only_trainable=True):
+        """ utility to count the number of (trainable) parameters in the model """
         if only_trainable:
             self.freeze_lm()
             return sum(p.numel() for p in self.parameters() if p.requires_grad) 
@@ -319,9 +342,12 @@ class FlamingoModel(PreTrainedModel):
     
     def _reorder_cache(self, past, beam_idx):
         """ hf specific function. Overridden from PreTrainedModel.
-        this is required for beam search in combination with use_cache.
 
-        past is a tuple of past_key_values of the xattn layers, and of the LM layers.
+        this is required for beam search in combination with use_cache.
+        
+        Args: 
+            past is a tuple of past_key_values of the xattn layers, and of the LM layers.
+            beam_idx: index of the beam
         """
         xattn_past, lm_past = past
 

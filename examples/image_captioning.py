@@ -5,7 +5,7 @@ from flamingo_mini.utils import load_url
 
 print('preparing model...')
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini-test', use_auth_token=True)
+model = FlamingoModel.from_pretrained('dhansmair/flamingo-tiny')
 model.to(device)
 model.eval()
 processor = FlamingoProcessor(model.config, load_vision_processor=True, device=device)
