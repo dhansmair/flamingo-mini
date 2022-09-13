@@ -13,7 +13,7 @@ Disclaimer: This model was trained for image captioning on the <a href="https://
  
 
 ## Install
-(tested with python3.8)
+(requires python 3.7)
 
 ```bash
 git clone https://github.com/dhansmair/flamingo-mini.git
