@@ -9,7 +9,7 @@ setup(
   author = 'dhansmair',
   author_email = 'd.hansmair@campus.lmu.de',
   url = 'https://github.com/dhansmair/flamingo-mini',
-  python_requires='>=3.8',
+  python_requires='>=3.7',
   long_description_content_type = 'text/markdown',
   keywords = [
     'artificial intelligence',
@@ -23,7 +23,8 @@ setup(
     'einops-exts',
     'torch>=1.6',
     'transformers',
-    'numpy'
+    'numpy',
+    'pillow'
   ],
   classifiers=[
     'Development Status :: 3 - Alpha',
@@ -31,6 +32,6 @@ setup(
     'Intended Audience :: Developers',
     'Topic :: Scientific/Engineering :: Artificial Intelligence',
     'License :: OSI Approved :: MIT License',
-    'Programming Language :: Python :: 3.8',
+    'Programming Language :: Python :: 3.7',
   ],
 )
