@@ -15,9 +15,6 @@ from .perceiver_resampler import PerceiverResampler
 from .gated_cross_attention import ModifiedLMBlock
 
 
-_TRAINABLE_STATE_DICT_KEYWORDS = ('resampler', 'xattn_block', 'lm_head')
-
-
 class FlamingoBaseModel(PreTrainedModel):
     """ 
     abstract class, which is inherited by FlamingoGPT2 and FlamingoOPT.
@@ -32,7 +29,7 @@ class FlamingoBaseModel(PreTrainedModel):
         self.config: FlamingoConfig = self.config           # just to enable type hints on self.config
         
         self.lm: PreTrainedModel = None                     # set in child class
-        self.lm_head: nn.Linear = None                      # set in child class
+        # self.lm_head: nn.Linear = None                      # set in child class
         self.resampler: PerceiverResampler = PerceiverResampler(
             dim=config.dim_visual,
             depth=config.resampler_depth,
@@ -74,45 +71,27 @@ class FlamingoBaseModel(PreTrainedModel):
     def freeze_lm(self):
         """
         set requires_grad = False for all components of the LM.
-        (!) in our implementation, lm_head is kept trainable and only 
-        initialized from lm_head of GPT2LMHeadModel / OPTForCausalLM
-
-        TODO do not freeze the token embeddings!
+        Must be implemented in child classes
         """
-        for param in self.lm.parameters():
-            param.requires_grad = False
-            
-        for param in self.lm_head.parameters():
-            param.requires_grad = True
-
-        for param in self.resampler.parameters():
-            param.requires_grad = True
-            
-
-        for xattn in self.modified_layers:
-            for param in xattn.xattn_block.parameters():
-                param.requires_grad = True
+        raise ValueError("implement freeze_lm() in a child class!")
                 
     def unfreeze_lm(self):
         for param in self.lm.parameters():
             param.requires_grad = True
-    
-    def state_dict_trainable(self) -> Dict[str, torch.Tensor]:
-        """obtain a state dict of only the trainable parameters of the model.
 
-        FIXME this method does not include the token embedding matrix. However it should be
-            part of the trainable state dict, since the embedding for the added <EOC> token
-            needs to be learned.
-            for OPT, it is stored in lm.decoder.embed_tokens
-            for GPT2, it is stored in wte
+    def state_dict_trainable(self) -> Dict[str, torch.Tensor]:
+        """ include weights in the state dict if they have requires_grad = True"""
+
+        trainable_param_names = [w for w, t in self.named_parameters() if t.requires_grad]
+        return {k:v for k, v in self.state_dict.items() if k in trainable_param_names}
+    
+    def parameters_trainable(self):
+        """Access the trainable parameters, e.g. useful for the optimizer and gradient clipping. 
+
+        example: optimizer = AdamW(model.parameters_trainable(), lr=args.lr)
+        make sure to call freeze_lm() first! 
         """
-        dict_trainable = {}
-        
-        for k, v in self.state_dict().items():
-            if any(keyword in k for keyword in _TRAINABLE_STATE_DICT_KEYWORDS):
-                dict_trainable[k] = v
-            
-        return dict_trainable
+        return filter(lambda p: p.requires_grad, self.parameters())
 
     def forward(
         self,
@@ -223,9 +202,30 @@ class FlamingoGPT2(FlamingoBaseModel):
         self.config.dim = base_lm.config.n_embd        
         base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
         self.lm: GPT2Model = base_lm.transformer
-        self.lm_head = base_lm.lm_head
+        
+        # copy the linear layer over to this class. With the previous line self.lm_head = base_lm.lm_head 
+        # the lm_head was for some reason not included in model.parameters()
+        self.lm_head = nn.Linear(base_lm.lm_head.in_features, base_lm.lm_head.out_features, bias=False)
+        with torch.no_grad():
+            self.lm_head.weight.copy_(base_lm.lm_head.weight)
+        
         self._init_layers(self.lm.h)
         
+    def freeze_lm(self):
+        """ freeze weights of the language model.
+        
+        (!) does not freeze token embedding matrix and gated xattn layers
+        """
+        
+        for param in self.lm.parameters():
+            param.requires_grad = False
+            
+        self.lm.wte.weight.requires_grad = True
+            
+        for xattn in self.modified_layers:
+            for param in xattn.xattn_block.parameters():
+                param.requires_grad = True
+                
     
 class FlamingoOPT(FlamingoBaseModel):
     config_class = FlamingoConfig
@@ -238,8 +238,29 @@ class FlamingoOPT(FlamingoBaseModel):
         self.config.dim = base_lm.config.hidden_size
         base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
         self.lm: OPTModel = base_lm.model
-        self.lm_head = base_lm.lm_head
+
+        # copy the linear layer over to this class. With the previous line self.lm_head = base_lm.lm_head 
+        # the lm_head was for some reason not included in model.parameters()
+        self.lm_head = nn.Linear(base_lm.lm_head.in_features, base_lm.lm_head.out_features, bias=False)
+        with torch.no_grad():
+            self.lm_head.weight.copy_(base_lm.lm_head.weight)
+
         self._init_layers(self.lm.decoder.layers)
+        
+    def freeze_lm(self):
+        """ freeze weights of the language model.
+        
+        (!) does not freeze token embedding matrix and gated xattn layers
+        """
+        
+        for param in self.lm.parameters():
+            param.requires_grad = False
+            
+        self.lm.decoder.embed_tokens.weight.requires_grad = True
+            
+        for xattn in self.modified_layers:
+            for param in xattn.xattn_block.parameters():
+                param.requires_grad = True
         
 
 class FlamingoModel(PreTrainedModel):
@@ -281,21 +302,13 @@ class FlamingoModel(PreTrainedModel):
         example: optimizer = AdamW(model.parameters_trainable(), lr=args.lr)
         make sure to call freeze_lm() first! 
         """
-        return filter(lambda p: p.requires_grad, self.parameters())
+        return self.flamingo.parameters_trainable()
     
     def freeze_lm(self):
         self.flamingo.freeze_lm()
         
     def unfreeze_lm(self):
         self.flamingo.unfreeze_lm() 
-        
-    def num_params(self, only_trainable=True):
-        """ utility to count the number of (trainable) parameters in the model """
-        if only_trainable:
-            self.freeze_lm()
-            return sum(p.numel() for p in self.parameters() if p.requires_grad) 
-        else:
-            return sum(p.numel() for p in self.parameters()) 
         
     def state_dict_trainable(self):
         return self.flamingo.state_dict_trainable()
