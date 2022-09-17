@@ -83,7 +83,7 @@ class FlamingoBaseModel(PreTrainedModel):
         """ include weights in the state dict if they have requires_grad = True"""
 
         trainable_param_names = [w for w, t in self.named_parameters() if t.requires_grad]
-        return {k:v for k, v in self.state_dict.items() if k in trainable_param_names}
+        return {k:v for k, v in self.state_dict().items() if k in trainable_param_names}
     
     def parameters_trainable(self):
         """Access the trainable parameters, e.g. useful for the optimizer and gradient clipping. 
