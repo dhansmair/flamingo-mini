@@ -41,8 +41,8 @@ class MaskedCrossAttention(nn.Module):
     def forward(
         self,
         y: torch.Tensor,
+        media_locations: torch.BoolTensor,
         visual_features=None,
-        media_locations=None,
         previous_kv=None,
         output_kv=False
     ):
@@ -65,7 +65,6 @@ class MaskedCrossAttention(nn.Module):
         Returns:
             FloatTensor: Tensor (n_batch, n_token, d_token)
         """
-        y_shape_before = y.shape
         n_batch, n_media = visual_features.shape[:2]
         n_batch_y, n_token, d_token = y.shape
         n_heads = self.heads
@@ -93,33 +92,36 @@ class MaskedCrossAttention(nn.Module):
         # 5. compute the attention scores from the queries and keys:
         sim = einsum('... i d, ... j d -> ... i j', q, k)
 
+        text_time = media_locations.cumsum(dim=-1) # at each boolean of True, increment the time counter (relative to media time)
+        
+        # >> David
+        # this needs to be adjusted if caching is used.
+        # text_time has shape (n_batch, n_token)
+        if previous_kv is not None:
+            text_time = text_time[:, -n_token:]
+            assert text_time.shape == y.shape[:2]
+        
+        media_time = torch.arange(n_media, device=y.device) + 1
         # >> David:
         # side note: here, text tokens attend to ALL previous visual tokens. If We only want to attend to the
         # one image coming before in the text (like in the flamingo paper),
         # we need to change >= to == at the line where 'text_to_media_mask' is created.
-        if media_locations is not None:
-            text_time = media_locations.cumsum(dim=-1) # at each boolean of True, increment the time counter (relative to media time)
-            
-            # >> David
-            # this needs to be adjusted if caching is used.
-            # text_time has shape (n_batch, n_token)
-            if previous_kv is not None:
-                text_time = text_time[:, -n_token:]
-                assert text_time.shape == y.shape[:2]
-            
-            media_time = torch.arange(n_media, device=y.device) + 1
-            text_to_media_mask = rearrange(text_time, 'b i -> b 1 i 1') == repeat(media_time, 'j -> 1 1 1 (j m)', m=self.n_visual)
-            sim = sim.masked_fill(~text_to_media_mask, -torch.finfo(sim.dtype).max)
+        text_to_media_mask = rearrange(text_time, 'b i -> b 1 i 1') == repeat(media_time, 'j -> 1 1 1 (j m)', m=self.n_visual)
+        sim = sim.masked_fill(~text_to_media_mask, -torch.finfo(sim.dtype).max)
 
         sim = sim - sim.amax(dim=-1, keepdim=True).detach()
         alphas = sim.softmax(dim=-1)
+        
+        # a bug and an update from lucidrains: 
+        # any text without a preceding media needs to have attention zeroed out
+        text_without_media_mask = text_time == 0
+        text_without_media_mask = rearrange(text_without_media_mask, 'b i -> b 1 i 1')
+        alphas = alphas.masked_fill(text_without_media_mask, 0.)
 
         out = einsum('... i j, ... j d -> ... i d', alphas, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
         
         conditioned_tokens = self.to_out(out)
-        
-        assert conditioned_tokens.shape == y_shape_before
 
         if output_kv:
             return conditioned_tokens, (k, v)
@@ -153,7 +155,14 @@ class GatedCrossAttentionBlock(nn.Module):
         self.ffw = FeedForward(dim, mult=ff_mult, act=act)
         self.alpha_ffw = nn.Parameter(torch.tensor([0.]))
 
-    def forward(self, y, visual_features, media_locations=None, previous_kv=None, output_kv=False):
+    def forward(
+        self, 
+        y: torch.LongTensor, 
+        visual_features: torch.FloatTensor, 
+        media_locations: torch.BoolTensor, 
+        previous_kv=None, 
+        output_kv=False
+    ):
         """
         :param y:           (n_batch, n_tokens, d_token) - language features from previous LM layer
         :param media:       (n_batch, n_media, n_queries, dim) - visual features, encoded by perceiver resample
@@ -165,7 +174,7 @@ class GatedCrossAttentionBlock(nn.Module):
         shape_before = y.shape
         
         # kv will be None if output_kv=False
-        attn_out, kv = self.attn(y, visual_features, media_locations=media_locations, previous_kv=previous_kv, output_kv=output_kv)
+        attn_out, kv = self.attn(y, media_locations, visual_features, previous_kv=previous_kv, output_kv=output_kv)
         y = y + tanh(self.alpha_attn) * attn_out
         assert y.shape == shape_before        
         y = y + tanh(self.alpha_ffw) * self.ffw(y)
@@ -200,7 +209,7 @@ class ModifiedLMBlock(nn.Module):
         self.xattn_layer_past = None
         self.kv_output = None
         
-    def condition(self, visual_features, media_locations, xattn_layer_past=None):
+    def condition(self, visual_features: torch.FloatTensor, media_locations: torch.BoolTensor, xattn_layer_past=None):
         """
         conditioning. Called from outside of the LM before passing the text input to the LM.
         This way, the gated cross-attention layers get informed about the visual input

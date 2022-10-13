@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import Tuple, Optional, List, Dict, Any, Union
 from PIL import Image
+from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
@@ -15,7 +16,7 @@ from .perceiver_resampler import PerceiverResampler
 from .gated_cross_attention import ModifiedLMBlock
 
 
-class FlamingoBaseModel(PreTrainedModel):
+class FlamingoBaseModel(ABC, PreTrainedModel):
     """ 
     abstract class, which is inherited by FlamingoGPT2 and FlamingoOPT.
     This class provides the core functionalities of Flamingo: the forward() function,
@@ -68,12 +69,13 @@ class FlamingoBaseModel(PreTrainedModel):
             self.modified_layers.append(modified_layer)
             lm_layers[i] = modified_layer
     
+    @abstractmethod
     def freeze_lm(self):
         """
         set requires_grad = False for all components of the LM.
-        Must be implemented in child classes
+        Must be implemented in child classes, because it depends on which LM is used.
         """
-        raise ValueError("implement freeze_lm() in a child class!")
+        raise NotImplementedError
                 
     def unfreeze_lm(self):
         for param in self.lm.parameters():
@@ -133,6 +135,7 @@ class FlamingoBaseModel(PreTrainedModel):
         """
 
         assert return_dict == True
+        batch_size = input_ids.size(0)
 
         if past_key_values is None:
             xattn_past_key_values, lm_past_key_values = None, None
@@ -143,10 +146,19 @@ class FlamingoBaseModel(PreTrainedModel):
         # (only need to do if kv of the xattn layers were not calculated yet.)
         # resample visual features (b N T v d) -> (b N T q d)
         if xattn_past_key_values is None and visual_features is not None:
-            n_batch = visual_features.shape[0]
             visual_features = rearrange(visual_features, 'b N T v d -> (b N) T v d')
             visual_features = self.resampler(visual_features)
-            visual_features = rearrange(visual_features, '(b N) q d -> b N q d', b=n_batch)
+            visual_features = rearrange(visual_features, '(b N) q d -> b N q d', b=batch_size)
+            
+        if visual_features is None:
+            # use dummy visual features. 
+            # This should not have an effect on the outcome of the model, unless media_locations is set incorrectly.
+            visual_features = torch.zeros((batch_size, 1, self.config.resampler_num_latents, self.config.dim_visual), 
+                                          dtype=torch.float32, 
+                                          device=input_ids.device)
+            
+        if media_locations is None:
+            media_locations = torch.zeros_like(input_ids)
             
         # condition xattn layers
         for i, xattn in enumerate(self.modified_layers):
@@ -255,7 +267,7 @@ class FlamingoOPT(FlamingoBaseModel):
         
         for param in self.lm.parameters():
             param.requires_grad = False
-            
+
         self.lm.decoder.embed_tokens.weight.requires_grad = True
             
         for xattn in self.modified_layers:
@@ -279,11 +291,21 @@ class FlamingoModel(PreTrainedModel):
         'facebook/opt': FlamingoOPT
     }
     
-    def __init__(self, config: FlamingoConfig):
+    def __init__(self, config: FlamingoConfig, model_class: Optional[type] = None):
+        """constructor.
+
+        Args:
+            config (FlamingoConfig): 
+                config for the flamingo model.
+            model_class (Optional[type], optional): 
+                optionally use a custom class that inherits FlamingoBaseModel. 
+                If none, it will choose FlamingoGPT2 or FlamingoOPT based on the FlamingoConfig. Defaults to None.
+        """
         super().__init__(config)
         
-        flamingo_class = self._find_flamingo_class(config.lm)
-        self.flamingo: FlamingoBaseModel = flamingo_class(config)
+        if model_class is None:
+            model_class = self._find_flamingo_class(config.lm)
+        self.flamingo: FlamingoBaseModel = model_class(config)
         
     @classmethod
     def is_lm_supported(cls, lm_id: str) -> bool:
@@ -340,7 +362,14 @@ class FlamingoModel(PreTrainedModel):
             if n_inputs != n_visual:
                 assert n_inputs % n_visual == 0
                 visual_features = repeat(visual_features, 'n ... -> (n m) ...', m=n_inputs // n_visual)
-                media_locations = repeat(media_locations, 'n ... -> (n m) ...', m=n_inputs // n_visual)
+                
+        if media_locations is not None:
+            n_inputs = input_ids.shape[0]
+            n_inputs_media = media_locations.shape[0]
+            
+            if n_inputs != n_inputs_media:
+                assert n_inputs % n_inputs_media == 0
+                media_locations = repeat(media_locations, 'n ... -> (n m) ...', m=n_inputs // n_inputs_media)
                 
         if past is not None:
             input_ids = input_ids[:, -1:]
