@@ -27,10 +27,9 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
     def __init__(self, config: FlamingoConfig):
         assert isinstance(config, FlamingoConfig)
         super().__init__(config)
-        self.config: FlamingoConfig = self.config           # just to enable type hints on self.config
         
         self.lm: PreTrainedModel = None                     # set in child class
-        # self.lm_head: nn.Linear = None                      # set in child class
+        self.lm_head: nn.Linear = None                      # set in child class
         self.resampler: PerceiverResampler = PerceiverResampler(
             dim=config.dim_visual,
             depth=config.resampler_depth,
@@ -69,14 +68,22 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
             self.modified_layers.append(modified_layer)
             lm_layers[i] = modified_layer
     
-    @abstractmethod
     def freeze_lm(self):
+        """ freeze weights of the language model.
+        
+        (!) does not freeze token embedding matrix and gated xattn layers
         """
-        set requires_grad = False for all components of the LM.
-        Must be implemented in child classes, because it depends on which LM is used.
-        """
-        raise NotImplementedError
-                
+        
+        for param in self.lm.parameters():
+            param.requires_grad = False
+            
+        # lm_head shares weights with the embeddings so no need to unfreeze that as well
+        self.lm.get_input_embeddings().weight.requires_grad = True
+            
+        for xattn in self.modified_layers:
+            for param in xattn.xattn_block.parameters():
+                param.requires_grad = True
+    
     def unfreeze_lm(self):
         for param in self.lm.parameters():
             param.requires_grad = True
@@ -214,29 +221,8 @@ class FlamingoGPT2(FlamingoBaseModel):
         self.config.dim = base_lm.config.n_embd        
         base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
         self.lm: GPT2Model = base_lm.transformer
-        
-        # copy the linear layer over to this class. With the previous line self.lm_head = base_lm.lm_head 
-        # the lm_head was for some reason not included in model.parameters()
-        self.lm_head = nn.Linear(base_lm.lm_head.in_features, base_lm.lm_head.out_features, bias=False)
-        with torch.no_grad():
-            self.lm_head.weight.copy_(base_lm.lm_head.weight)
-        
+        self.lm_head = base_lm.lm_head
         self._init_layers(self.lm.h)
-        
-    def freeze_lm(self):
-        """ freeze weights of the language model.
-        
-        (!) does not freeze token embedding matrix and gated xattn layers
-        """
-        
-        for param in self.lm.parameters():
-            param.requires_grad = False
-            
-        self.lm.wte.weight.requires_grad = True
-            
-        for xattn in self.modified_layers:
-            for param in xattn.xattn_block.parameters():
-                param.requires_grad = True
                 
     
 class FlamingoOPT(FlamingoBaseModel):
@@ -250,29 +236,8 @@ class FlamingoOPT(FlamingoBaseModel):
         self.config.dim = base_lm.config.hidden_size
         base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
         self.lm: OPTModel = base_lm.model
-
-        # copy the linear layer over to this class. With the previous line self.lm_head = base_lm.lm_head 
-        # the lm_head was for some reason not included in model.parameters()
-        self.lm_head = nn.Linear(base_lm.lm_head.in_features, base_lm.lm_head.out_features, bias=False)
-        with torch.no_grad():
-            self.lm_head.weight.copy_(base_lm.lm_head.weight)
-
+        self.lm_head = base_lm.lm_head
         self._init_layers(self.lm.decoder.layers)
-        
-    def freeze_lm(self):
-        """ freeze weights of the language model.
-        
-        (!) does not freeze token embedding matrix and gated xattn layers
-        """
-        
-        for param in self.lm.parameters():
-            param.requires_grad = False
-
-        self.lm.decoder.embed_tokens.weight.requires_grad = True
-            
-        for xattn in self.modified_layers:
-            for param in xattn.xattn_block.parameters():
-                param.requires_grad = True
         
 
 class FlamingoModel(PreTrainedModel):
