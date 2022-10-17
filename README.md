@@ -1,5 +1,5 @@
 # Flamingo mini
-Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">deepmind  Flamingo</a> vision-language model, which equips an existing language model with the capability to understand visual data such as images or videos. The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.  
+Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">deepmind  Flamingo</a> vision-language model, which enables an existing language model with to understand visual input such as images or videos. The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.  
 
 (!) Note that this repo is work in progress and may be subject to breaking changes.  
 
@@ -63,6 +63,7 @@ resampler_act: str = 'gelu'         # activation function in the resampler FFW b
 model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini')           # or flamingo-tiny
 processor = FlamingoProcessor(model.config)
 ```
+Details about the model configurations: https://github.com/dhansmair/flamingo-mini/wiki/Model-Configurations
 A complete example is provided in `examples/image_captioning.py`.
 
 
@@ -121,6 +122,13 @@ FlamingoModel *-- FlamingoBaseModel
 FlamingoBaseModel <|-- FlamingoOPT
 FlamingoBaseModel <|-- FlamingoGPT2
 ```
+
+## Acknowledgements
+
+- The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers.
+- It utilizes pretrained vision and language models hosted on <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>.
+  - OPT: https://huggingface.co/facebook/opt-350m, https://huggingface.co/facebook/opt-125m
+  - CLIP ViT: https://huggingface.co/openai/clip-vit-large-patch14
 
 ## Citations
 
