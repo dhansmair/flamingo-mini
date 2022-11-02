@@ -87,6 +87,7 @@ class MaskedCrossAttention(nn.Module):
         else:
             # visual_features can be ignored, k, v already computed
             k, v = previous_kv
+            n_media = k.size(2) // self.n_visual
             q = rearrange(q, 'b n (h d) -> b h n d', h=n_heads)
 
         # 5. compute the attention scores from the queries and keys:

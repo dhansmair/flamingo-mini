@@ -1,13 +1,7 @@
-"""
-Perceiver Resampler, simply copied from flamingo-pytorch for now.
-
-TODO add explanation of parameters
-"""
-
 import torch
-from torch import nn, einsum
 from einops import rearrange, repeat
 from einops_exts import rearrange_many
+from torch import einsum, nn
 
 from .utils import FeedForward
 

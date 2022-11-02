@@ -1,19 +1,23 @@
 from __future__ import annotations
-from typing import Tuple, Optional, List, Dict, Any, Union
-from PIL import Image
+
 from abc import ABC, abstractmethod
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.nn import CrossEntropyLoss
+import torch.nn.functional as F
 from einops import rearrange, repeat
-from transformers import GPT2LMHeadModel, GPT2Model, OPTForCausalLM, OPTModel, PreTrainedModel
-from transformers.modeling_outputs import CausalLMOutputWithPast, BaseModelOutputWithPast
+from PIL import Image
+from torch.nn import CrossEntropyLoss
+from transformers import (GPT2LMHeadModel, GPT2Model, OPTForCausalLM, OPTModel,
+                          PreTrainedModel)
+from transformers.modeling_outputs import (BaseModelOutputWithPast,
+                                           CausalLMOutputWithPast)
 
 from .configuration_flamingo import FlamingoConfig
 from .flamingo_processor import FlamingoProcessor
-from .perceiver_resampler import PerceiverResampler
 from .gated_cross_attention import ModifiedLMBlock
+from .perceiver_resampler import PerceiverResampler
 
 
 class FlamingoBaseModel(ABC, PreTrainedModel):
@@ -112,6 +116,7 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         past_key_values: Optional[tuple] = None,
         return_dict: bool = True,
         labels: Optional[torch.LongTensor] = None,
+        loss_reduction: str = 'mean',
         **kwargs
     ) -> CausalLMOutputWithPast:
         """Flamingo forward pass
@@ -141,7 +146,7 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         
         """
 
-        assert return_dict == True
+        assert return_dict
         batch_size = input_ids.size(0)
 
         if past_key_values is None:
@@ -198,8 +203,9 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
             shift_labels = labels[..., 1:].contiguous()         # labels shape (batch, seq_length)
 
             # Flatten the tokens
-            loss_fct = CrossEntropyLoss()
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            # loss_fct = CrossEntropyLoss()
+            # loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
+            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), reduction=loss_reduction)
         
         return CausalLMOutputWithPast(
             loss=loss,

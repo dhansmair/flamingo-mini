@@ -1,6 +1,9 @@
-from PIL import Image
-from typing import List, Tuple, Union, Optional
+from typing import List, Optional, Tuple, Union
+
 import torch
+from PIL import Image
+from transformers import AutoTokenizer, GPT2Tokenizer, GPT2TokenizerFast, CLIPVisionModel
+from transformers.models.clip.feature_extraction_clip import CLIPFeatureExtractor
 
 from .configuration_flamingo import FlamingoConfig
 from .utils import unzip
@@ -18,30 +21,28 @@ class FlamingoProcessor:
         device: torch.device = None,
         load_tokenizer: bool = True,
         load_vision_processor: bool = False,
-        output_captions: bool = False
+        output_captions: bool = False,
+        use_fast: bool = True
     ):
         self.config = config
         self.device = device
         self.output_captions = output_captions
+        self.vision_processor = CLIPFeatureExtractor.from_pretrained(config.clip_model_type)
         
         if load_vision_processor:
-            from transformers import CLIPVisionModel
-            from transformers.models.clip.feature_extraction_clip import CLIPFeatureExtractor
-
-            self.vision_processor = CLIPFeatureExtractor.from_pretrained(config.clip_model_type)
             self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
             self.vision_model.to(device)
         else:
-            self.vision_processor = None
             self.vision_model = None
         
         if load_tokenizer:
-            from transformers import GPT2Tokenizer
-            
             if config.lm.startswith('gpt2'):
-                self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+                if use_fast:
+                    self.tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
+                else:
+                    self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
             elif config.lm.startswith('facebook/opt'):
-                self.tokenizer = GPT2Tokenizer.from_pretrained('facebook/opt-30b')
+                self.tokenizer = AutoTokenizer.from_pretrained('facebook/opt-30b', use_fast=use_fast)
             
             self.eoc_token = '<EOC>'
             self.tokenizer.add_bos_token = True
@@ -60,8 +61,24 @@ class FlamingoProcessor:
                 self.tokenizer.encode(" <")[-1]
             ]
 
-    def encode_text(self, text: Union[str, List[str]], device: torch.device = None) -> Tuple[torch.LongTensor, torch.BoolTensor, torch.LongTensor]:
-        result = self.tokenizer(text, return_tensors='pt', padding=True)
+    def encode_text(
+        self,
+        text: Union[str, List[str]],
+        device: torch.device = None,
+        max_length=None
+    ) -> Tuple[torch.LongTensor, torch.BoolTensor, torch.LongTensor]:
+        if max_length is None:
+            result = self.tokenizer(text, return_tensors='pt', padding=True)
+        else:
+            result = self.tokenizer(
+                text,
+                return_tensors='pt',
+                return_attention_mask=True,
+                padding='max_length',
+                truncation=True,
+                max_length=max_length)
+            
+            
         media_locs = self.get_media_locations(result.input_ids)
 
         return result.input_ids.to(device), media_locs.to(device), result.attention_mask.to(device)
