@@ -1,9 +1,12 @@
 from typing import List, Optional, Tuple, Union
 
 import torch
+from einops import rearrange
 from PIL import Image
-from transformers import AutoTokenizer, GPT2Tokenizer, GPT2TokenizerFast, CLIPVisionModel
-from transformers.models.clip.feature_extraction_clip import CLIPFeatureExtractor
+from transformers import (AutoTokenizer, CLIPVisionModel, GPT2Tokenizer,
+                          GPT2TokenizerFast)
+from transformers.models.clip.feature_extraction_clip import \
+    CLIPFeatureExtractor
 
 from .configuration_flamingo import FlamingoConfig
 from .utils import unzip
@@ -18,16 +21,21 @@ class FlamingoProcessor:
     def __init__(
         self,
         config: FlamingoConfig,
-        device: torch.device = None,
+        device: Optional[torch.device] = None,
         load_tokenizer: bool = True,
         load_vision_processor: bool = False,
-        output_captions: bool = False,
         use_fast: bool = True
     ):
         self.config = config
         self.device = device
-        self.output_captions = output_captions
         self.vision_processor = CLIPFeatureExtractor.from_pretrained(config.clip_model_type)
+
+        # dummy output of the vision processor
+        self.dummy_output = torch.zeros(                                
+            (3, self.vision_processor.size, self.vision_processor.size),
+            dtype=torch.float,
+            device=device
+        )
         
         if load_vision_processor:
             self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
@@ -60,21 +68,41 @@ class FlamingoProcessor:
                 self.tokenizer.encode("<")[-1],
                 self.tokenizer.encode(" <")[-1]
             ]
+            
+    def to(self, device: Optional[torch.device]):
+        self.device = device
+        self.dummy_output = self.dummy_output.to(device)
+        
+        if self.vision_model is not None:
+            self.vision_model.to(device)
 
     def encode_text(
         self,
         text: Union[str, List[str]],
-        device: torch.device = None,
-        max_length=None
+        device: Optional[torch.device] = None,
+        max_length=None,
+        length=None
     ) -> Tuple[torch.LongTensor, torch.BoolTensor, torch.LongTensor]:
-        if max_length is None:
-            result = self.tokenizer(text, return_tensors='pt', padding=True)
-        else:
+        
+        if length is not None:
             result = self.tokenizer(
                 text,
                 return_tensors='pt',
                 return_attention_mask=True,
                 padding='max_length',
+                truncation=True,
+                max_length=length)
+        elif max_length is None:
+            result = self.tokenizer(
+                text,
+                return_tensors='pt', 
+                padding=True)
+        else:
+            result = self.tokenizer(
+                text,
+                return_tensors='pt',
+                return_attention_mask=True,
+                padding=True,
                 truncation=True,
                 max_length=max_length)
             
@@ -113,7 +141,11 @@ class FlamingoProcessor:
         """
         return self.vision_processor(images=images, return_tensors="pt", padding=True)
 
-    def extract_features(self, images: Union[Image.Image, List[Image.Image]], to_device: bool = True) -> torch.FloatTensor:
+    def extract_features(
+            self,
+            images: Union[Image.Image, torch.Tensor, List[Union[Image.Image, torch.Tensor]]],
+            to_device: bool = True
+        ) -> torch.FloatTensor:
         
         if self.vision_processor is None or self.vision_model is None:
             raise ValueError("flamingo processor not initialized with vision processor")
@@ -129,33 +161,29 @@ class FlamingoProcessor:
 
         return self.vision_model(pixels).last_hidden_state
     
-    def collate_fn(self, batch):
-        """ 
-        intended to be used with a dataloader. The underlying dataset should return a tuple (features, tokenized_captions, captions).
-        it returns a tensor of features, a tensor of tokenized captions (padded), attention mask, and media_locations
-        
-        TODO experiment specific functionality, remove from flamingo processor
+    def extract_features_from_preprocessed(self, pixels: torch.Tensor) -> torch.Tensor:
         """
-        
-        # a list of features, and a list of tensors of different length
-        features, tokenized_captions, captions = unzip(batch)
-        features = torch.stack(features)
-        
-        b = len(tokenized_captions)
-        l = max([len(tc) for tc in tokenized_captions])
-        
-        # prepare token ids and mask
-        input_ids = torch.full((b, l), self.tokenizer.pad_token_id, dtype=torch.int64)
-        mask = torch.zeros((b, l), dtype=torch.int64)
+        only does the extraction step.
+        Assuming pixels have been extracted from image(s) by a CLIPFeatureExtractor
 
-        for i, row in enumerate(tokenized_captions):
-            input_ids[i, :len(row)] = torch.from_numpy(row)
-            mask[i, :len(row)] = 1
-       
-        media_locs = self.get_media_locations(input_ids)        
-        
-        if self.output_captions:
-            return features, input_ids, mask, media_locs, captions
-        else:
-            return features, input_ids, mask, media_locs
-    
+        Args:
+            pixels (torch.Tensor) expected shape [b N c=3 h w]
+                b = batch size
+                N = #images
+                c = channels have to be 3
+                h = height
+                w = width
+            
+        Returns:
+            (torch.Tensor) shape [b N T=1 v d]
+            where
+                b = batch size
+                N = #images
+                T = #frames for video, but video is not actively supported by flamingo_mini
+                v = visual features
+                d = dimensionality of the visual features
+        """
+        batch_size = pixels.size(0)
+        pixels = rearrange(pixels, 'b N c h w -> (b N) c h w')
+        visual_features = self.vision_model(pixels).last_hidden_state
+        return rearrange(visual_features, '(b N) v d -> b N 1 v d', b=batch_size)
