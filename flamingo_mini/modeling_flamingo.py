@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from abc import ABC
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from einops import rearrange, repeat
+from einops_exts import repeat_many
 from PIL import Image
-from torch.nn import CrossEntropyLoss
-from transformers import (GPT2LMHeadModel, GPT2Model, OPTForCausalLM, OPTModel,
-                          PreTrainedModel)
-from transformers.modeling_outputs import (BaseModelOutputWithPast,
-                                           CausalLMOutputWithPast)
+from transformers import PreTrainedModel
+from transformers.modeling_outputs import (
+    BaseModelOutputWithPast,
+    CausalLMOutputWithPast
+)
 
 from .configuration_flamingo import FlamingoConfig
 from .flamingo_processor import FlamingoProcessor
 from .gated_cross_attention import ModifiedLMBlock
 from .perceiver_resampler import PerceiverResampler
+from .utils import get_common_prefix_length
 
 
 class FlamingoBaseModel(ABC, PreTrainedModel):
@@ -158,6 +160,7 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         # (only need to do if kv of the xattn layers were not calculated yet.)
         # resample visual features (b N T v d) -> (b N T q d)
         if xattn_past_key_values is None and visual_features is not None:
+            assert visual_features.size(0) == batch_size, "visual_features must have the same batch size as the textual input!"
             visual_features = rearrange(visual_features, 'b N T v d -> (b N) T v d')
             visual_features = self.resampler(visual_features)
             visual_features = rearrange(visual_features, '(b N) q d -> b N q d', b=batch_size)
@@ -220,6 +223,7 @@ class FlamingoGPT2(FlamingoBaseModel):
     config_class = FlamingoConfig
     
     def __init__(self, config: FlamingoConfig):
+        from transformers import GPT2LMHeadModel, GPT2Model
         assert config.lm.startswith('gpt')
         super().__init__(config)
 
@@ -235,6 +239,7 @@ class FlamingoOPT(FlamingoBaseModel):
     config_class = FlamingoConfig
     
     def __init__(self, config: FlamingoConfig):
+        from transformers import OPTForCausalLM, OPTModel
         assert config.lm.startswith('facebook/opt')
         super().__init__(config)
         
@@ -253,6 +258,7 @@ class FlamingoModel(PreTrainedModel):
     This class implements prepare_inputs_for_generation() and reorder_cache(), which are required to utilize hf text generation methods.
     It also has a generate_captions() utility that can be used to create a caption for an image.
     """
+    config: FlamingoConfig
     config_class = FlamingoConfig
     
     # key = prefix of an existing pretrained huggingface transformer language model
@@ -312,8 +318,8 @@ class FlamingoModel(PreTrainedModel):
     def prepare_inputs_for_generation(
         self, 
         input_ids: torch.LongTensor, 
-        visual_features: torch.FloatTensor = None, 
-        media_locations: torch.LongTensor = None, 
+        visual_features: Optional[torch.FloatTensor] = None, 
+        media_locations: Optional[torch.LongTensor] = None, 
         past=None, 
         **kwargs
     ) -> Dict[str, Any]:
@@ -381,7 +387,7 @@ class FlamingoModel(PreTrainedModel):
         self, 
         processor: FlamingoProcessor, 
         visual_features: Optional[torch.FloatTensor] = None, 
-        images: Union[Image.Image, List[Image.Image]] = None,
+        images: Optional[Union[Image.Image, List[Image.Image]]] = None,
         prompt: str = "<image>", 
         max_length: int = 150, 
         num_beams: int = 1
@@ -430,3 +436,104 @@ class FlamingoModel(PreTrainedModel):
         captions = [processor.remove_tags(t) for t in captions]
         return captions
     
+    @torch.no_grad()
+    def score_sequences(
+        self,
+        visual_features: torch.Tensor,
+        input_ids: torch.Tensor,
+        media_locations: torch.Tensor,
+        attention_mask: torch.Tensor,
+        k: int = 100000,
+    ) -> torch.Tensor:
+        """
+        
+        EXPERIMENTAL
+
+        This method can be used for zero-shot classification.
+        Given a batch of tokenized sentences, it computes the log-prob over each sample.
+        
+        inspired by ALBEF:
+            https://github.com/salesforce/ALBEF/blob/b9727e43c3040491774d1b22cc27718aa7772fac/models/model_vqa.py#L149
+        
+        To improve efficiency, the implementation works like this:
+        (1) find the longest common prefix over all sequences.
+        (2) pass the prefix once and obtain the attention keys and values for LM and xattn layers
+        (3) based on the likelihood for the next token, filter the top-k sequences for the next steps.
+        (4) repeat keys and values for all top-k sequences
+        (5) pass the top-k sequences to the model. use cached kv
+        (6) compute the log-prob from the remaining parts and use as a score.
+            For all sequences that didn't make it to the top-k, set the score to -inf
+            
+        TODO method fails when all sequences are equal
+
+        Args:
+            visual_features (torch.FloatTensor):    [N 1 q d]
+                (!) the visual features are treated as the same for the complete batch of sentences
+            input_ids (torch.Tensor):           [b L]
+            media_locations (torch.Tensor):     [b L]
+            attention_mask (torch.Tensor):      [b L]
+
+        Returns:
+            torch.Tensor: log-probs for the batch of input sequences
+                Tensor of shape [b], dtype torch.float 
+        """
+
+        assert visual_features.ndim == 4, f"visual features must have shape [N 1 q d], but has {visual_features.ndim} dimensions!"
+
+        n_choices = input_ids.size(0)
+        n_reuse = get_common_prefix_length(input_ids)
+        k = min(k, n_choices)
+
+        # first, pass the complete prefix and compute the hidden states.
+        out = self.flamingo(
+            input_ids=input_ids[:1, :n_reuse],
+            media_locations=media_locations[:1, :n_reuse],
+            attention_mask=attention_mask[:1, :n_reuse],
+            visual_features=visual_features.unsqueeze(0),               # add outermost dimension [N 1 q d] -> [1 N 1 q d]
+            use_cache=True,
+        )
+
+        next_tokens = input_ids[:, n_reuse]
+        next_token_logits = out.logits[0, -1, :].index_select(0, next_tokens)
+        topk_indices = next_token_logits.topk(k).indices
+
+        # extend past_key_values to all sequences
+        xattn_past_key_values = [
+            tuple(repeat_many(kv, "1 ... -> b ...", b=k))
+            for kv in out.past_key_values[0]
+        ]
+        lm_past_key_values = [
+            (
+                repeat(keys, "1 ... -> b ...", b=k)[:, :, :-1, :],
+                repeat(vals, "1 ... -> b ...", b=k)[:, :, :-1, :],
+            )
+            for keys, vals in out.past_key_values[1]
+        ]
+
+        past_key_values = (xattn_past_key_values, lm_past_key_values)
+
+        # then pass all choice sequences individually.
+        choice_input_ids = input_ids[topk_indices, n_reuse - 1 :]
+        choice_media_locations = media_locations[topk_indices]
+        choice_attention_mask = attention_mask[topk_indices]
+
+        # at this point, we don't need the visual features anymore, since they have already been passed through 
+        # the perceiver resampler and the keys and values for them have been precomputed in the xattn layers.
+        out2 = self.flamingo(
+            input_ids=choice_input_ids,
+            media_locations=choice_media_locations,
+            attention_mask=choice_attention_mask,
+            visual_features=None,
+            past_key_values=past_key_values,
+            labels=choice_input_ids,
+            loss_reduction="none",
+        )
+
+        losses = out2.loss.reshape((k, -1)).sum(dim=1)
+
+        # copy the losses over to another vector
+        scores = torch.full(
+            [n_choices], torch.finfo(torch.float).min, device=losses.device
+        )
+        scores[topk_indices] = -losses
+        return scores.detach()

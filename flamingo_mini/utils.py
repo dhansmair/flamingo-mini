@@ -1,9 +1,9 @@
 """
 utils
 """
-from PIL import Image
 import requests
 import torch
+from PIL import Image
 from torch import nn
 
 
@@ -48,3 +48,11 @@ def FeedForward(dim, mult=4, act='gelu'):
         acts[act](),
         nn.Linear(inner_dim, dim, bias=False)
     )
+
+
+def get_common_prefix_length(x: torch.Tensor) -> int:
+    # assuming that x is a matrix
+    try:
+        return (x[0] == x[1:]).all(dim=0).tolist().index(False)
+    except ValueError:
+        return x.size(1)
