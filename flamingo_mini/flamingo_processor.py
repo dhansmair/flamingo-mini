@@ -1,15 +1,25 @@
+import contextlib
 from typing import List, Optional, Tuple, Union
+import logging
+from PIL import Image
 
 import torch
 from einops import rearrange
-from PIL import Image
-from transformers import (AutoTokenizer, CLIPVisionModel, GPT2Tokenizer,
-                          GPT2TokenizerFast)
 from transformers.models.clip.feature_extraction_clip import \
     CLIPFeatureExtractor
 
 from .configuration_flamingo import FlamingoConfig
-from .utils import unzip
+
+
+@contextlib.contextmanager
+def suppress_model_loading_warnings(suppress: bool = True):
+    if suppress:
+        logger = logging.getLogger('transformers.modeling_utils')
+        level = logger.level
+        logger.setLevel(logging.CRITICAL)
+    yield
+    if suppress:
+        logger.setLevel(level)
 
 
 class FlamingoProcessor:
@@ -23,8 +33,9 @@ class FlamingoProcessor:
         config: FlamingoConfig,
         device: Optional[torch.device] = None,
         load_tokenizer: bool = True,
-        load_vision_processor: bool = False,
-        use_fast: bool = True
+        load_vision_model: bool = False,
+        use_fast: bool = True,
+        suppress_warnings: bool = True
     ):
         self.config = config
         self.device = device
@@ -37,8 +48,12 @@ class FlamingoProcessor:
             device=device
         )
         
-        if load_vision_processor:
-            self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
+        if load_vision_model:
+            from transformers import CLIPVisionModel
+
+            with suppress_model_loading_warnings(suppress_warnings):
+                self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
+
             self.vision_model.to(device)
         else:
             self.vision_model = None
@@ -46,10 +61,16 @@ class FlamingoProcessor:
         if load_tokenizer:
             if config.lm.startswith('gpt2'):
                 if use_fast:
+                    from transformers import GPT2TokenizerFast
+
                     self.tokenizer = GPT2TokenizerFast.from_pretrained('gpt2')
                 else:
+                    from transformers import GPT2Tokenizer
+
                     self.tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
             elif config.lm.startswith('facebook/opt'):
+                from transformers import AutoTokenizer
+                
                 self.tokenizer = AutoTokenizer.from_pretrained('facebook/opt-30b', use_fast=use_fast)
             
             self.eoc_token = '<EOC>'
@@ -58,9 +79,7 @@ class FlamingoProcessor:
             self.tokenizer.add_tokens(self.eoc_token)
 
             # find the start token for "<image>". " <" is 1279, "<" is 27
-            # => use the latter as in the text there is "...<EOC><image>example text...", so no
-            # whitespace before the "<" of "<image>"
-            # the encoded "<" token-id is different if there is a whitespace before.
+            # the encoded "<" token-id is different if there is a preceding whitespace.
             #        with ws    without
             # gpt-2:  1279         27
             # opt:   28696      51552
