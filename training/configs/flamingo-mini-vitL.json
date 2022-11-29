@@ -1,0 +1,20 @@
+{
+    "lm": "facebook/opt-350m",
+    "clip_model_type": "openai/clip-vit-large-patch14",
+    "dim": 1024,
+    "dim_visual": 1024,
+
+    "xattn_every": 1,
+    "xattn_dim_head": 128,
+    "xattn_heads": 16,
+    "xattn_ff_mult": 4,
+    "xattn_act": "sqrelu",
+
+    "resampler_depth": 6,
+    "resampler_dim_head": 128,
+    "resampler_heads": 16,
+    "resampler_num_latents": 64,
+    "resampler_num_time_embeds": 4,
+    "resampler_ff_mult": 4,
+    "resampler_act": "sqrelu"
+}
