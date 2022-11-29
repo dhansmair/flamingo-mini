@@ -1,0 +1,20 @@
+{
+    "lm": "facebook/opt-125m",
+    "clip_model_type": "openai/clip-vit-base-patch32",
+    "dim": 768,
+    "dim_visual": 768,
+
+    "xattn_every": 1,
+    "xattn_dim_head": 64,
+    "xattn_heads": 8,
+    "xattn_ff_mult": 4,
+    "xattn_act": "sqrelu",
+
+    "resampler_depth": 6,
+    "resampler_dim_head": 64,
+    "resampler_heads": 8,
+    "resampler_num_latents": 64,
+    "resampler_num_time_embeds": 4,
+    "resampler_ff_mult": 4,
+    "resampler_act": "sqrelu"
+}
