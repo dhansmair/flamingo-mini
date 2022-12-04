@@ -3,7 +3,7 @@ Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-t
 
 (!) Note that this repo is work in progress and may be subject to breaking changes.  
 
-- [ ] provide simple training script
+- [x] provide simple training script -> currently in a separate branch: https://github.com/dhansmair/flamingo-mini/tree/training
 - [ ] create chatting demo
 
 
