@@ -2,6 +2,7 @@
 gated cross-attention layer.
 adapted from flamingo-pytorch.
 """
+from __future__ import annotations
 from typing import Optional, Tuple
 import torch
 from torch import nn, einsum, tanh
@@ -41,8 +42,8 @@ class MaskedCrossAttention(nn.Module):
     def forward(
         self,
         y: torch.Tensor,
-        media_locations: torch.BoolTensor,
-        visual_features=None,
+        media_locations: torch.Tensor,
+        visual_features: torch.Tensor,
         previous_kv=None,
         output_kv=False
     ):
@@ -158,9 +159,9 @@ class GatedCrossAttentionBlock(nn.Module):
 
     def forward(
         self, 
-        y: torch.LongTensor, 
-        visual_features: torch.FloatTensor, 
-        media_locations: torch.BoolTensor, 
+        y: torch.Tensor, 
+        visual_features: torch.Tensor, 
+        media_locations: torch.Tensor, 
         previous_kv=None, 
         output_kv=False
     ):
@@ -210,7 +211,7 @@ class ModifiedLMBlock(nn.Module):
         self.xattn_layer_past = None
         self.kv_output = None
         
-    def condition(self, visual_features: torch.FloatTensor, media_locations: torch.BoolTensor, xattn_layer_past=None):
+    def condition(self, visual_features: torch.Tensor, media_locations: torch.Tensor, xattn_layer_past=None) -> None:
         """
         conditioning. Called from outside of the LM before passing the text input to the LM.
         This way, the gated cross-attention layers get informed about the visual input
@@ -229,8 +230,8 @@ class ModifiedLMBlock(nn.Module):
         
     def forward(
         self,
-        hidden_states: Optional[Tuple[torch.FloatTensor]],
-        use_cache: Optional[bool] = False,
+        hidden_states: Tuple[torch.Tensor] | None,
+        use_cache: bool | None = False,
         **kwargs
     ):
         """

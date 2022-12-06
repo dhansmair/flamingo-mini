@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List
 
 import torch
 import torch.nn as nn
@@ -28,15 +28,18 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
     This class provides the core functionalities of Flamingo: the forward() function,
     setting up the resampler and hijacking the LM layers with GatedXAttn layers.
     """
+    lm: PreTrainedModel
+    lm_head: nn.Linear
+    resampler: PerceiverResampler
+    modified_layers: List[ModifiedLMBlock]
+
     config_class = FlamingoConfig
-    
+
     def __init__(self, config: FlamingoConfig):
         assert isinstance(config, FlamingoConfig)
         super().__init__(config)
-        
-        self.lm: PreTrainedModel = None                     # set in child class
-        self.lm_head: nn.Linear = None                      # set in child class
-        self.resampler: PerceiverResampler = PerceiverResampler(
+
+        self.resampler = PerceiverResampler(
             dim=config.dim_visual,
             depth=config.resampler_depth,
             dim_head=config.resampler_dim_head,
@@ -48,15 +51,15 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         )
 
         # a list of direct references to the augmented lm layers
-        self.modified_layers: List[ModifiedLMBlock] = []
-    
+        self.modified_layers = []
+
     def _init_layers(self, lm_layers: nn.ModuleList):
         """ 
         call during init of the subclass.
         careful, this method will modify the LM layers!
         """
-        self.modified_layers: List[ModifiedLMBlock] = []
-        
+        self.modified_layers = []
+
         for i, lm_layer in enumerate(lm_layers):
             if i % self.config.xattn_every != 0: 
                 continue
@@ -73,23 +76,23 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
             )
             self.modified_layers.append(modified_layer)
             lm_layers[i] = modified_layer
-    
+
     def freeze_lm(self):
         """ freeze weights of the language model.
-        
+
         (!) does not freeze token embedding matrix and gated xattn layers
         """
-        
+
         for param in self.lm.parameters():
             param.requires_grad = False
-            
+
         # lm_head shares weights with the embeddings so no need to unfreeze that as well
         self.lm.get_input_embeddings().weight.requires_grad = True
-            
+
         for xattn in self.modified_layers:
             for param in xattn.xattn_block.parameters():
                 param.requires_grad = True
-    
+
     def unfreeze_lm(self):
         for param in self.lm.parameters():
             param.requires_grad = True
@@ -97,9 +100,10 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
     def state_dict_trainable(self) -> Dict[str, torch.Tensor]:
         """ include weights in the state dict if they have requires_grad = True"""
 
-        trainable_param_names = [w for w, t in self.named_parameters() if t.requires_grad]
-        return {k:v for k, v in self.state_dict().items() if k in trainable_param_names}
-    
+        trainable_param_names = [
+            w for w, t in self.named_parameters() if t.requires_grad]
+        return {k: v for k, v in self.state_dict().items() if k in trainable_param_names}
+
     def parameters_trainable(self):
         """Access the trainable parameters, e.g. useful for the optimizer and gradient clipping. 
 
@@ -110,28 +114,27 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
 
     def forward(
         self,
-        input_ids: torch.LongTensor,
-        attention_mask: Optional[torch.LongTensor] = None,
-        media_locations: Optional[torch.BoolTensor] = None,
-        visual_features: Optional[torch.FloatTensor] = None,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+        media_locations: torch.Tensor | None = None,
+        visual_features: torch.Tensor | None = None,
         use_cache: bool = False,
-        past_key_values: Optional[tuple] = None,
+        past_key_values: tuple | None = None,
         return_dict: bool = True,
-        labels: Optional[torch.LongTensor] = None,
+        labels: torch.Tensor | None = None,
         loss_reduction: str = 'mean',
         **kwargs
     ) -> CausalLMOutputWithPast:
         """Flamingo forward pass
-        
+
         Most of the parameters are inspired by huggingface language model implementations, so this doc may be informative:
         https://huggingface.co/docs/transformers/model_doc/gpt2#transformers.GPT2Model.forward
-        
+
         Args:
             input_ids (LongTensor):         shape (n_batch, n_tokens). the tokenized input text
             attention_mask (LongTensor):    shape (n_batch, n_tokens). 
                 Mask as produced by the tokenizer. Required when a batch of input strings are tokenized and thus padded at the end.
                 Then this will indicate the locations of 'real' tokens vs. the location of 'pad' tokens.
-                TODO why is this a LongTensor and not a BoolTensor?
             media_locations (BoolTensor):   shape (n_batch, n_tokens).
                 indicates the locations of the starts of the <image> tags beginning, i.e. the location of the token representing '<'
             visual_features (FloatTensor):  shape (n_batch, n_images, n_frames, n_features, dim_feature).
@@ -142,10 +145,10 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
                 It is possible to pass the exact value as input_ids also as labels. If present, the output will contain a CE loss of the next token prediction.
                 optional, defaults to None
             **kwargs
-        
+
         Returns:
             (CausalLMOutputWithPast): an object containing all the useful stuff. Refer to hf documentation.
-        
+
         """
 
         assert return_dict
@@ -153,63 +156,69 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
 
         if past_key_values is None:
             xattn_past_key_values, lm_past_key_values = None, None
-        else: 
-            xattn_past_key_values, lm_past_key_values = past_key_values 
+        else:
+            xattn_past_key_values, lm_past_key_values = past_key_values
 
         # perceiver resampler
         # (only need to do if kv of the xattn layers were not calculated yet.)
         # resample visual features (b N T v d) -> (b N T q d)
         if xattn_past_key_values is None and visual_features is not None:
-            assert visual_features.size(0) == batch_size, "visual_features must have the same batch size as the textual input!"
-            visual_features = rearrange(visual_features, 'b N T v d -> (b N) T v d')
+            assert visual_features.size(
+                0) == batch_size, "visual_features must have the same batch size as the textual input!"
+            visual_features = rearrange(
+                visual_features, 'b N T v d -> (b N) T v d')
             visual_features = self.resampler(visual_features)
-            visual_features = rearrange(visual_features, '(b N) q d -> b N q d', b=batch_size)
-            
+            visual_features = rearrange(
+                visual_features, '(b N) q d -> b N q d', b=batch_size)
+
         if visual_features is None:
-            # use dummy visual features. 
+            # use dummy visual features.
             # This should not have an effect on the outcome of the model, unless media_locations is set incorrectly.
-            visual_features = torch.zeros((batch_size, 1, self.config.resampler_num_latents, self.config.dim_visual), 
-                                          dtype=torch.float32, 
+            visual_features = torch.zeros((batch_size, 1, self.config.resampler_num_latents, self.config.dim_visual),
+                                          dtype=torch.float32,
                                           device=input_ids.device)
-            
+
         if media_locations is None:
             media_locations = torch.zeros_like(input_ids)
-            
+
         # condition xattn layers
         for i, xattn in enumerate(self.modified_layers):
             layer_past = None if xattn_past_key_values is None else xattn_past_key_values[i]
             xattn.condition(visual_features, media_locations, layer_past)
-            
+
         # pass through LM
         out: BaseModelOutputWithPast = self.lm(
-            input_ids=input_ids, 
+            input_ids=input_ids,
             attention_mask=attention_mask,
             use_cache=use_cache,
-            past_key_values=lm_past_key_values, 
+            past_key_values=lm_past_key_values,
             return_dict=True,
             **kwargs
         )
-        
+
         logits: torch.FloatTensor = self.lm_head(out.last_hidden_state)
-        
+
         # collect the past_key_values from the xattn layers
         if use_cache:
-            xattn_past_key_values = [] 
+            xattn_past_key_values = []
             for modified_layer in self.modified_layers:
                 xattn_past_key_values.append(modified_layer.kv_output)
-                
+
         loss = None
         if labels is not None:
             # loss function calculation, inspired by hf implementations
             # Shift so that tokens < n predict n
-            shift_logits = logits[..., :-1, :].contiguous()     # logits shape (batch, seq_length, #words)
-            shift_labels = labels[..., 1:].contiguous()         # labels shape (batch, seq_length)
+            # logits shape (batch, seq_length, #words)
+            shift_logits = logits[..., :-1, :].contiguous()
+            # labels shape (batch, seq_length)
+            shift_labels = labels[..., 1:].contiguous()
 
             # Flatten the tokens
             # loss_fct = CrossEntropyLoss()
             # loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1), reduction=loss_reduction)
-        
+            loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
+                                   shift_labels.view(-1), reduction=loss_reduction)
+
         return CausalLMOutputWithPast(
             loss=loss,
             logits=logits,
@@ -221,54 +230,61 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
 
 class FlamingoGPT2(FlamingoBaseModel):
     config_class = FlamingoConfig
-    
+
     def __init__(self, config: FlamingoConfig):
         from transformers import GPT2LMHeadModel, GPT2Model
         assert config.lm.startswith('gpt')
         super().__init__(config)
 
-        base_lm = GPT2LMHeadModel.from_pretrained(config.lm)
-        self.config.dim = base_lm.config.n_embd        
+        base_lm: GPT2LMHeadModel = GPT2LMHeadModel.from_pretrained(config.lm)  # type: ignore
+        
+        assert self.config.dim == base_lm.config.n_embd, \
+            f"specified {self.config.dim=} in FlamingoConfig, but {config.lm} has hidden size={base_lm.config.n_embd}"
+
+        
         base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
         self.lm: GPT2Model = base_lm.transformer
         self.lm_head = base_lm.lm_head
         self._init_layers(self.lm.h)
-                
-    
+
+
 class FlamingoOPT(FlamingoBaseModel):
     config_class = FlamingoConfig
-    
+
     def __init__(self, config: FlamingoConfig):
         from transformers import OPTForCausalLM, OPTModel
         assert config.lm.startswith('facebook/opt')
         super().__init__(config)
-        
-        base_lm = OPTForCausalLM.from_pretrained(config.lm)
-        self.config.dim = base_lm.config.hidden_size
+
+        base_lm: OPTForCausalLM = OPTForCausalLM.from_pretrained(config.lm)  # type: ignore
+
+        assert self.config.dim == base_lm.config.hidden_size, \
+            f"specified {self.config.dim=} in FlamingoConfig, but {config.lm} has hidden size={base_lm.config.hidden_size}"
+
         base_lm.resize_token_embeddings(base_lm.config.vocab_size + 1)
         self.lm: OPTModel = base_lm.model
         self.lm_head = base_lm.lm_head
         self._init_layers(self.lm.decoder.layers)
-        
+
 
 class FlamingoModel(PreTrainedModel):
     """wrapper class for a FlamingoBase decending model (FlamingoGPT2 or FlamingoOPT)
-    
+
     A generic flamingo interface that is independent of the underlying LM. Most of the methods are just forwarding to the actual model.
     This class implements prepare_inputs_for_generation() and reorder_cache(), which are required to utilize hf text generation methods.
     It also has a generate_captions() utility that can be used to create a caption for an image.
     """
     config: FlamingoConfig
     config_class = FlamingoConfig
-    
+
     # key = prefix of an existing pretrained huggingface transformer language model
     # value = Flamingo class for the respective language model
     _LANGUAGE_MODEL_VERSIONS = {
         'gpt2': FlamingoGPT2,
         'facebook/opt': FlamingoOPT
     }
-    
-    def __init__(self, config: FlamingoConfig, model_class: Optional[type] = None):
+
+    def __init__(self, config: FlamingoConfig, model_class: type | None = None):
         """constructor.
 
         Args:
@@ -279,15 +295,15 @@ class FlamingoModel(PreTrainedModel):
                 If none, it will choose FlamingoGPT2 or FlamingoOPT based on the FlamingoConfig. Defaults to None.
         """
         super().__init__(config)
-        
+
         if model_class is None:
             model_class = self._find_flamingo_class(config.lm)
         self.flamingo: FlamingoBaseModel = model_class(config)
-        
+
     @classmethod
     def is_lm_supported(cls, lm_id: str) -> bool:
         return any(lm_id.startswith(prefix) for prefix in cls._LANGUAGE_MODEL_VERSIONS.keys())
-            
+
     @classmethod
     def _find_flamingo_class(cls, language_model_id: str):
         for prefix, flamingo_class in cls._LANGUAGE_MODEL_VERSIONS.items():
@@ -302,55 +318,57 @@ class FlamingoModel(PreTrainedModel):
         make sure to call freeze_lm() first! 
         """
         return self.flamingo.parameters_trainable()
-    
+
     def freeze_lm(self):
         self.flamingo.freeze_lm()
-        
+
     def unfreeze_lm(self):
-        self.flamingo.unfreeze_lm() 
-        
+        self.flamingo.unfreeze_lm()
+
     def state_dict_trainable(self):
         return self.flamingo.state_dict_trainable()
-            
+
     def forward(self, *args, **kwargs) -> CausalLMOutputWithPast:
         return self.flamingo(*args, **kwargs)
 
     def prepare_inputs_for_generation(
-        self, 
-        input_ids: torch.LongTensor, 
-        visual_features: Optional[torch.FloatTensor] = None, 
-        media_locations: Optional[torch.LongTensor] = None, 
-        past=None, 
+        self,
+        input_ids: torch.Tensor,
+        visual_features: torch.Tensor | None = None,
+        media_locations: torch.Tensor | None = None,
+        past=None,
         **kwargs
     ) -> Dict[str, Any]:
         """ hf specific function. Overridden from PreTrainedModel for text generation purposes.
-        
+
         for beam search, input_ids is replicated times the number of beams. 
         I.e., batch_size' = batch_size * num_beams. 
         This function replicates also the visual_features and media_locations accordingly.
 
         if use_cache is used, past is not None, then only the last column will be passed as input_ids.
-        """ 
-        
+        """
+
         if visual_features is not None:
             n_inputs = input_ids.shape[0]
             n_visual = visual_features.shape[0]
-            
+
             if n_inputs != n_visual:
                 assert n_inputs % n_visual == 0
-                visual_features = repeat(visual_features, 'n ... -> (n m) ...', m=n_inputs // n_visual)
-                
+                visual_features = repeat(
+                    visual_features, 'n ... -> (n m) ...', m=n_inputs // n_visual)
+
         if media_locations is not None:
             n_inputs = input_ids.shape[0]
             n_inputs_media = media_locations.shape[0]
-            
+
             if n_inputs != n_inputs_media:
                 assert n_inputs % n_inputs_media == 0
-                media_locations = repeat(media_locations, 'n ... -> (n m) ...', m=n_inputs // n_inputs_media)
-                
+                media_locations = repeat(
+                    media_locations, 'n ... -> (n m) ...', m=n_inputs // n_inputs_media)
+
         if past is not None:
             input_ids = input_ids[:, -1:]
-        
+
         return dict(
             input_ids=input_ids,
             past_key_values=past,
@@ -358,12 +376,12 @@ class FlamingoModel(PreTrainedModel):
             media_locations=media_locations,
             **kwargs
         )
-    
+
     def _reorder_cache(self, past, beam_idx):
         """ hf specific function. Overridden from PreTrainedModel.
 
         this is required for beam search in combination with use_cache.
-        
+
         Args: 
             past is a tuple of past_key_values of the xattn layers, and of the LM layers.
             beam_idx: index of the beam
@@ -371,25 +389,27 @@ class FlamingoModel(PreTrainedModel):
         xattn_past, lm_past = past
 
         xattn_past_beam = tuple(
-            tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past)
+            tuple(past_state.index_select(0, beam_idx.to(past_state.device))
+                  for past_state in layer_past)
             for layer_past in xattn_past
         )
-        
+
         lm_past_beam = tuple(
-            tuple(past_state.index_select(0, beam_idx.to(past_state.device)) for past_state in layer_past)
+            tuple(past_state.index_select(0, beam_idx.to(past_state.device))
+                  for past_state in layer_past)
             for layer_past in lm_past
         )
-        
+
         return xattn_past_beam, lm_past_beam
-    
+
     @torch.no_grad()
     def generate_captions(
-        self, 
-        processor: FlamingoProcessor, 
-        visual_features: Optional[torch.FloatTensor] = None, 
-        images: Optional[Union[Image.Image, List[Image.Image]]] = None,
-        prompt: str = "<image>", 
-        max_length: int = 150, 
+        self,
+        processor: FlamingoProcessor,
+        visual_features: torch.Tensor | None = None,
+        images: Image.Image | List[Image.Image] | None = None,
+        prompt: str = "<image>",
+        max_length: int = 150,
         num_beams: int = 1
     ):
         """
@@ -399,25 +419,26 @@ class FlamingoModel(PreTrainedModel):
         if images is not None:
             if isinstance(images, Image.Image):
                 images = [images]
-                
+
             assert visual_features is None, "you can only pass either images or visual features to generate_captions()!"
             visual_features = processor.extract_features(images)
 
         assert visual_features is not None, "you must pass either images or visual features to generate_captions()!"
-        
+
         if visual_features.ndim == 2:
-            visual_features = rearrange(visual_features, 'f d -> 1 1 1 f d') 
-            
+            visual_features = rearrange(visual_features, 'f d -> 1 1 1 f d')
+
         elif visual_features.ndim == 3:
             visual_features = rearrange(visual_features, 'b f d -> b 1 1 f d')
-            
+
         batch_size = visual_features.shape[0]
         device = visual_features.device
-        input_ids, media_locations, attention_mask = processor.encode_text(prompt, device)
+        input_ids, media_locations, attention_mask = processor.encode_text(
+            prompt, device)
         input_ids = repeat(input_ids[0], 'l -> n l', n=batch_size)
         media_locations = repeat(media_locations[0], 'l -> n l', n=batch_size)
         attention_mask = repeat(attention_mask[0], 'l -> n l', n=batch_size)
-            
+
         out_ids = self.generate(
             inputs=input_ids,
             visual_features=visual_features,
@@ -431,11 +452,12 @@ class FlamingoModel(PreTrainedModel):
             pad_token_id=self.flamingo.lm.config.eos_token_id,
             max_length=max_length
         )
-        
-        captions = processor.tokenizer.batch_decode(out_ids, skip_special_tokens=True)
+
+        captions = processor.tokenizer.batch_decode(
+            out_ids, skip_special_tokens=True)
         captions = [processor.remove_tags(t) for t in captions]
         return captions
-    
+
     @torch.no_grad()
     def score_sequences(
         self,
@@ -446,15 +468,15 @@ class FlamingoModel(PreTrainedModel):
         k: int = 100000,
     ) -> torch.Tensor:
         """
-        
+
         EXPERIMENTAL
 
         This method can be used for zero-shot classification.
         Given a batch of tokenized sentences, it computes the log-prob over each sample.
-        
+
         inspired by ALBEF:
             https://github.com/salesforce/ALBEF/blob/b9727e43c3040491774d1b22cc27718aa7772fac/models/model_vqa.py#L149
-        
+
         To improve efficiency, the implementation works like this:
         (1) find the longest common prefix over all sequences.
         (2) pass the prefix once and obtain the attention keys and values for LM and xattn layers
@@ -463,7 +485,7 @@ class FlamingoModel(PreTrainedModel):
         (5) pass the top-k sequences to the model. use cached kv
         (6) compute the log-prob from the remaining parts and use as a score.
             For all sequences that didn't make it to the top-k, set the score to -inf
-            
+
         TODO method fails when all sequences are equal
 
         Args:
@@ -489,7 +511,8 @@ class FlamingoModel(PreTrainedModel):
             input_ids=input_ids[:1, :n_reuse],
             media_locations=media_locations[:1, :n_reuse],
             attention_mask=attention_mask[:1, :n_reuse],
-            visual_features=visual_features.unsqueeze(0),               # add outermost dimension [N 1 q d] -> [1 N 1 q d]
+            # add outermost dimension [N 1 q d] -> [1 N 1 q d]
+            visual_features=visual_features.unsqueeze(0),
             use_cache=True,
         )
 
@@ -513,11 +536,11 @@ class FlamingoModel(PreTrainedModel):
         past_key_values = (xattn_past_key_values, lm_past_key_values)
 
         # then pass all choice sequences individually.
-        choice_input_ids = input_ids[topk_indices, n_reuse - 1 :]
+        choice_input_ids = input_ids[topk_indices, n_reuse - 1:]
         choice_media_locations = media_locations[topk_indices]
         choice_attention_mask = attention_mask[topk_indices]
 
-        # at this point, we don't need the visual features anymore, since they have already been passed through 
+        # at this point, we don't need the visual features anymore, since they have already been passed through
         # the perceiver resampler and the keys and values for them have been precomputed in the xattn layers.
         out2 = self.flamingo(
             input_ids=choice_input_ids,
@@ -530,6 +553,11 @@ class FlamingoModel(PreTrainedModel):
         )
 
         losses = out2.loss.reshape((k, -1)).sum(dim=1)
+
+        #losses_attention_mask = choice_attention_mask[:, -losses.size(1):]
+        #losses = losses * losses_attention_mask
+        #losses = losses.sum(dim=1)
+        #losses = losses / losses_attention_mask.sum(dim=1)
 
         # copy the losses over to another vector
         scores = torch.full(

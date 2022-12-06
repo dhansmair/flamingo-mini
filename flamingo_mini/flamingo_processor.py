@@ -1,5 +1,6 @@
+from __future__ import annotations
 import contextlib
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple
 import logging
 from PIL import Image
 
@@ -17,9 +18,10 @@ def suppress_model_loading_warnings(suppress: bool = True):
         logger = logging.getLogger('transformers.modeling_utils')
         level = logger.level
         logger.setLevel(logging.CRITICAL)
-    yield
-    if suppress:
+        yield
         logger.setLevel(level)
+    else:
+        yield
 
 
 class FlamingoProcessor:
@@ -31,12 +33,23 @@ class FlamingoProcessor:
     def __init__(
         self,
         config: FlamingoConfig,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
         load_tokenizer: bool = True,
         load_vision_model: bool = False,
         use_fast: bool = True,
         suppress_warnings: bool = True
     ):
+        """
+        Args:
+            config (FlamingoConfig): pass the same FlamingoConfig as used to initialize the FlamingoModel.
+            device (torch.device | None): if passed, vision_model will be directly loaded onto the device.
+            load_tokenizer (bool): whether to load the tokenizer or not.
+            load_vision_model (bool): whether to load the vision_model or not. In some cases we only need 
+                the tokenizer, then not loading the vision_model will save time.
+            use_fast (bool): whether to use the fast tokenizer implementations from huggingface.
+            suppress_warnings (bool): when loading only the CLIPVisionModel from the checkpoint,
+                from_pretrained() will log a warning that some weights have not been used. We can ignore this.
+        """
         self.config = config
         self.device = device
         self.vision_processor = CLIPFeatureExtractor.from_pretrained(config.clip_model_type)
@@ -49,12 +62,11 @@ class FlamingoProcessor:
         )
         
         if load_vision_model:
-            from transformers import CLIPVisionModel
+            from transformers.models.clip.modeling_clip import CLIPVisionModel
 
             with suppress_model_loading_warnings(suppress_warnings):
                 self.vision_model = CLIPVisionModel.from_pretrained(config.clip_model_type)
-
-            self.vision_model.to(device)
+                self.vision_model.to(device)
         else:
             self.vision_model = None
         
@@ -88,7 +100,7 @@ class FlamingoProcessor:
                 self.tokenizer.encode(" <")[-1]
             ]
             
-    def to(self, device: Optional[torch.device]):
+    def to(self, device: torch.device | None):
         self.device = device
         self.dummy_output = self.dummy_output.to(device)
         
@@ -97,11 +109,11 @@ class FlamingoProcessor:
 
     def encode_text(
         self,
-        text: Union[str, List[str]],
-        device: Optional[torch.device] = None,
+        text: str | List[str],
+        device: torch.device | None = None,
         max_length=None,
         length=None
-    ) -> Tuple[torch.LongTensor, torch.BoolTensor, torch.LongTensor]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         if length is not None:
             result = self.tokenizer(
@@ -144,16 +156,16 @@ class FlamingoProcessor:
             text = text.replace(s, '')
         return text.strip()
     
-    def remove_tags(self, text: Union[str, List[str]]) -> str:
+    def remove_tags(self, text: str | List[str]) -> str | List[str]:
         if isinstance(text, str):
             return self._remove_tags(text)
         else:
             return [self._remove_tags(t) for t in text]
     
-    def get_media_locations(self, input_ids: torch.Tensor) -> torch.BoolTensor:
+    def get_media_locations(self, input_ids: torch.Tensor) -> torch.Tensor:
         return torch.stack([(input_ids == leq_id) for leq_id in self.leq_ids]).sum(0)
     
-    def preprocess_images(self, images: List[Image.Image]):
+    def preprocess_images(self, images: List[Image.Image]) -> torch.Tensor:
         """
         :param images: a list of PIL image instances
         :return: Tensor of shape [n_images, width, height, depth]
@@ -162,11 +174,11 @@ class FlamingoProcessor:
 
     def extract_features(
             self,
-            images: Union[Image.Image, torch.Tensor, List[Union[Image.Image, torch.Tensor]]],
+            images: Image.Image | torch.Tensor | List[Image.Image] | List[torch.Tensor],
             to_device: bool = True
-        ) -> torch.FloatTensor:
+        ) -> torch.Tensor:
         
-        if self.vision_processor is None or self.vision_model is None:
+        if self.vision_model is None:
             raise ValueError("flamingo processor not initialized with vision processor")
         
         if isinstance(images, Image.Image):

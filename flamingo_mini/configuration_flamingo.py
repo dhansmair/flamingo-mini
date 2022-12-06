@@ -1,14 +1,7 @@
 from transformers.configuration_utils import PretrainedConfig
 
-AVAILABLE_ACTIVATION_FUNCTIONS = ('sqrelu', 'gelu')
-
 
 class FlamingoConfig(PretrainedConfig):
-    """ Configuration file for Flamingo.
-    
-    The parameters `xattn` and `resampler` are legacy params. Previously, all xattn_* and resampler_* params
-    were passed in separate dictionaries. So the two are kept for backwards compatibility.
-    """
     
     def __init__(
         self,
@@ -30,6 +23,26 @@ class FlamingoConfig(PretrainedConfig):
         resampler_act: str = 'gelu',
         **kwargs
     ):
+        """ Flamingo Configuration Class
+        
+        Args:
+            lm (str): huggingface identifier of the language model. supported are 'gpt2' variations and 'facebook/opt-*'
+            clip_model_type (str): huggingface identifier of the vision encoder.
+            dim (int): LM embedding size
+            dim_visual (int): Vision encoder embedding size
+            xattn_every (int): frequency of interleaved gated xattn layers.
+            xattn_dim_head (int): inner dim of xattn heads
+            xattn_heads (int): number of attention heads in the xattn layers
+            xattn_ff_mult (int): ?
+            xattn_act (str): activation function to use in the xattn layers. Flamingo used 'sqrelu' in their paper.
+            resampler_depth (int): number of attention layers in the perceiver resampler.
+            resampler_dim_head: inner dim of resampler attention heads
+            resampler_heads (int): number of attention heads in the resampler
+            resampler_num_latents (int): number of learnable queries in the resampler
+            resampler_num_time_embeds (int): ?
+            resampler_ff_mult (int): ?
+            resampler_act (str): activation function of the resampler. Flamingo used 'sqrelu' in their paper.
+        """
         super().__init__(**kwargs)
         self.lm = lm
         self.clip_model_type = clip_model_type

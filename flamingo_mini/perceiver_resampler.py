@@ -178,7 +178,7 @@ class PerceiverResampler(nn.Module):
         # d = dimension of queries
         x = repeat(self.latents, 'q d -> b q d', b=n_batches)
 
-        for attn, ffw in self.layers:
+        for attn, ffw in self.layers:  # type: ignore
             x = x + attn(x_f, x)
             x = x + ffw(x)
 
