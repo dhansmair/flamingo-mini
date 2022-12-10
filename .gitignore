@@ -1,5 +1,6 @@
 
 .vscode/
+wandb/
 
 training/checkpoints/
 training/logs/
@@ -7,7 +8,6 @@ training/evaluation/results/
 training/evaluation/summary/
 training/evaluation/logs/
 
-wandb/
 
 # Byte-compiled / optimized / DLL files
 
