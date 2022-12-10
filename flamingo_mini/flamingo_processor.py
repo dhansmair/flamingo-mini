@@ -37,7 +37,8 @@ class FlamingoProcessor:
         load_tokenizer: bool = True,
         load_vision_model: bool = False,
         use_fast: bool = True,
-        suppress_warnings: bool = True
+        suppress_warnings: bool = True,
+        eoc_token: str = '<EOC>'
     ):
         """
         Args:
@@ -52,14 +53,8 @@ class FlamingoProcessor:
         """
         self.config = config
         self.device = device
+        self.eoc_token = eoc_token
         self.vision_processor = CLIPFeatureExtractor.from_pretrained(config.clip_model_type)
-
-        # dummy output of the vision processor
-        self.dummy_output = torch.zeros(                                
-            (3, self.vision_processor.size, self.vision_processor.size),
-            dtype=torch.float,
-            device=device
-        )
         
         if load_vision_model:
             from transformers.models.clip.modeling_clip import CLIPVisionModel
@@ -85,7 +80,6 @@ class FlamingoProcessor:
                 
                 self.tokenizer = AutoTokenizer.from_pretrained('facebook/opt-30b', use_fast=use_fast)
             
-            self.eoc_token = '<EOC>'
             self.tokenizer.add_bos_token = True
             self.tokenizer.pad_token = self.tokenizer.eos_token
             self.tokenizer.add_tokens(self.eoc_token)

@@ -214,8 +214,6 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
             shift_labels = labels[..., 1:].contiguous()
 
             # Flatten the tokens
-            # loss_fct = CrossEntropyLoss()
-            # loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
             loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
                                    shift_labels.view(-1), reduction=loss_reduction)
 
@@ -336,6 +334,7 @@ class FlamingoModel(PreTrainedModel):
         input_ids: torch.Tensor,
         visual_features: torch.Tensor | None = None,
         media_locations: torch.Tensor | None = None,
+        attention_mask: torch.Tensor | None = None,
         past=None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -374,6 +373,7 @@ class FlamingoModel(PreTrainedModel):
             past_key_values=past,
             visual_features=visual_features,
             media_locations=media_locations,
+            attention_mask=attention_mask,
             **kwargs
         )
 
@@ -553,11 +553,6 @@ class FlamingoModel(PreTrainedModel):
         )
 
         losses = out2.loss.reshape((k, -1)).sum(dim=1)
-
-        #losses_attention_mask = choice_attention_mask[:, -losses.size(1):]
-        #losses = losses * losses_attention_mask
-        #losses = losses.sum(dim=1)
-        #losses = losses / losses_attention_mask.sum(dim=1)
 
         # copy the losses over to another vector
         scores = torch.full(
