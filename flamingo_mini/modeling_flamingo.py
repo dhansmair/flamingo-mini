@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from abc import ABC
 from typing import Any, Dict, List
+import contextlib
+import logging
 
 import torch
 import torch.nn as nn
@@ -10,6 +12,7 @@ from einops import rearrange, repeat
 from einops_exts import repeat_many
 from PIL import Image
 from transformers import PreTrainedModel
+from transformers.models.clip.modeling_clip import CLIPVisionModel
 from transformers.modeling_outputs import (
     BaseModelOutputWithPast,
     CausalLMOutputWithPast
@@ -22,6 +25,21 @@ from .perceiver_resampler import PerceiverResampler
 from .utils import get_common_prefix_length
 
 
+
+@contextlib.contextmanager
+def suppress_model_loading_warnings(suppress: bool = True):
+    if suppress:
+        logger = logging.getLogger('transformers.modeling_utils')
+        level = logger.level
+        logger.setLevel(logging.CRITICAL)
+        yield
+        logger.setLevel(level)
+    else:
+        yield
+
+
+
+
 class FlamingoBaseModel(ABC, PreTrainedModel):
     """ 
     abstract class, which is inherited by FlamingoGPT2 and FlamingoOPT.
@@ -32,12 +50,16 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
     lm_head: nn.Linear
     resampler: PerceiverResampler
     modified_layers: List[ModifiedLMBlock]
+    vision_encoder: CLIPVisionModel
 
     config_class = FlamingoConfig
 
-    def __init__(self, config: FlamingoConfig):
+    def __init__(self, config: FlamingoConfig, suppress_warnings=True):
         assert isinstance(config, FlamingoConfig)
         super().__init__(config)
+        
+        with suppress_model_loading_warnings(suppress_warnings):
+            self.vision_encoder = CLIPVisionModel.from_pretrained(config.clip_model_type)
 
         self.resampler = PerceiverResampler(
             dim=config.dim_visual,
@@ -76,6 +98,11 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
             )
             self.modified_layers.append(modified_layer)
             lm_layers[i] = modified_layer
+            
+    def freeze_vm(self):
+        """freeze vision model """
+        for param in self.vision_encoder.parameters():
+            param.requires_grad = False
 
     def freeze_lm(self):
         """ freeze weights of the language model.
@@ -117,7 +144,8 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor | None = None,
         media_locations: torch.Tensor | None = None,
-        visual_features: torch.Tensor | None = None,
+        #visual_features: torch.Tensor | None = None,
+        pixel_values: torch.Tensor | None = None,
         use_cache: bool = False,
         past_key_values: tuple | None = None,
         return_dict: bool = True,
@@ -137,7 +165,11 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
                 Then this will indicate the locations of 'real' tokens vs. the location of 'pad' tokens.
             media_locations (BoolTensor):   shape (n_batch, n_tokens).
                 indicates the locations of the starts of the <image> tags beginning, i.e. the location of the token representing '<'
-            visual_features (FloatTensor):  shape (n_batch, n_images, n_frames, n_features, dim_feature).
+            #visual_features (FloatTensor):  shape (n_batch, n_images, n_frames, n_features, dim_feature).
+            
+            pixel_values (torch.Tensor | None):    shape [b N T c h w]. Optional.
+
+
             use_cache (bool): whether to return the inner keys and values. Used to speed up text generation at inference. defaults to False
             past_key_values (tuple): tuple of past_key_values of (1) the xattn layers (2) the language model
             return_dict (bool): Whether to return a dictionary. Right now, only dicts are supported, so this must be set to True. Defaults to True.
@@ -158,18 +190,38 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
             xattn_past_key_values, lm_past_key_values = None, None
         else:
             xattn_past_key_values, lm_past_key_values = past_key_values
+            
+        visual_features = None
 
-        # perceiver resampler
-        # (only need to do if kv of the xattn layers were not calculated yet.)
-        # resample visual features (b N T v d) -> (b N T q d)
-        if xattn_past_key_values is None and visual_features is not None:
-            assert visual_features.size(
-                0) == batch_size, "visual_features must have the same batch size as the textual input!"
-            visual_features = rearrange(
-                visual_features, 'b N T v d -> (b N) T v d')
+        if xattn_past_key_values is None and pixel_values is not None:
+
+            assert pixel_values.size(0) == batch_size, \
+                "visual_features must have the same batch size as the textual input!"
+                
+            if pixel_values.ndim == 4:              # (b c h w)
+                b, N, T = pixel_values.size(0), 1, 1
+            
+            elif pixel_values.ndim == 5:              # (b N c h w)
+                b, N, T = *pixel_values.shape[:1], 1
+                pixel_values = rearrange(pixel_values, 'b N c h w -> (b N) c h w')
+
+            elif pixel_values.ndim == 6:            # (b N T c h w) -> (b N T v d)
+                b, N, T = pixel_values.shape[:2]
+                pixel_values = rearrange(pixel_values, 'b N T c h w -> (b N T) c h w')
+            else:
+                raise ValueError('pixel_values must have ndim 5 or 6!')
+
+            visual_features = self.vision_encoder(pixel_values).last_hidden_state         # (b N T) v d
+            # visual_features = rearrange(visual_features, '(b N T) v d -> b N T v d', b=b, N=N, T=T)
+
+            # perceiver resampler
+            # (only need to do if kv of the xattn layers were not calculated yet.)
+            # resample visual features ((b N T) v d) -> (b N T q d)
+            visual_features = rearrange(visual_features, '(b N T) v d -> (b N) T v d', b=b, N=N, T=T)
             visual_features = self.resampler(visual_features)
-            visual_features = rearrange(
-                visual_features, '(b N) q d -> b N q d', b=batch_size)
+
+            # T is gone at this point
+            visual_features = rearrange(visual_features, '(b N) q d -> b N q d', b=b, N=N)
 
         if visual_features is None:
             # use dummy visual features.
@@ -281,6 +333,8 @@ class FlamingoModel(PreTrainedModel):
         'gpt2': FlamingoGPT2,
         'facebook/opt': FlamingoOPT
     }
+    
+    _keys_to_ignore_on_load_missing = [r"flamingo.vision_encoder"]
 
     def __init__(self, config: FlamingoConfig, model_class: type | None = None):
         """constructor.
@@ -332,9 +386,10 @@ class FlamingoModel(PreTrainedModel):
     def prepare_inputs_for_generation(
         self,
         input_ids: torch.Tensor,
-        visual_features: torch.Tensor | None = None,
+        #visual_features: torch.Tensor | None = None,
         media_locations: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
+        pixel_values: torch.Tensor | None = None,
         past=None,
         **kwargs
     ) -> Dict[str, Any]:
@@ -347,14 +402,23 @@ class FlamingoModel(PreTrainedModel):
         if use_cache is used, past is not None, then only the last column will be passed as input_ids.
         """
 
-        if visual_features is not None:
+        # if visual_features is not None:
+        #     n_inputs = input_ids.shape[0]
+        #     n_visual = visual_features.shape[0]
+
+        #     if n_inputs != n_visual:
+        #         assert n_inputs % n_visual == 0
+        #         visual_features = repeat(
+        #             visual_features, 'n ... -> (n m) ...', m=n_inputs // n_visual)
+        if pixel_values is not None:
             n_inputs = input_ids.shape[0]
-            n_visual = visual_features.shape[0]
+            n_visual = pixel_values.shape[0]
 
             if n_inputs != n_visual:
                 assert n_inputs % n_visual == 0
-                visual_features = repeat(
-                    visual_features, 'n ... -> (n m) ...', m=n_inputs // n_visual)
+                pixel_values = repeat(
+                    pixel_values, 'n ... -> (n m) ...', m=n_inputs // n_visual)
+            
 
         if media_locations is not None:
             n_inputs = input_ids.shape[0]
@@ -371,9 +435,10 @@ class FlamingoModel(PreTrainedModel):
         return dict(
             input_ids=input_ids,
             past_key_values=past,
-            visual_features=visual_features,
+            #visual_features=visual_features,
             media_locations=media_locations,
             attention_mask=attention_mask,
+            pixel_values=pixel_values,
             **kwargs
         )
 
@@ -406,44 +471,42 @@ class FlamingoModel(PreTrainedModel):
     def generate_captions(
         self,
         processor: FlamingoProcessor,
-        visual_features: torch.Tensor | None = None,
+        # visual_features: torch.Tensor | None = None,
+        pixel_values: torch.Tensor | None = None,
         images: Image.Image | List[Image.Image] | None = None,
         prompt: str = "<image>",
         max_length: int = 150,
-        num_beams: int = 1
+        num_beams: int = 1,
+        device: torch.device | None = None
     ):
         """
         helper utility for image captioning.
         prompt is replicated for all batches.
         """
         if images is not None:
+            assert pixel_values is None, "you can only pass either images or visual features to generate_captions()!"
+
             if isinstance(images, Image.Image):
                 images = [images]
 
-            assert visual_features is None, "you can only pass either images or visual features to generate_captions()!"
-            visual_features = processor.extract_features(images)
+            pixel_values = processor(images=images, device=device)['pixel_values']
 
-        assert visual_features is not None, "you must pass either images or visual features to generate_captions()!"
+        assert pixel_values is not None, "you must pass either images or visual features to generate_captions()!"
 
-        if visual_features.ndim == 2:
-            visual_features = rearrange(visual_features, 'f d -> 1 1 1 f d')
-
-        elif visual_features.ndim == 3:
-            visual_features = rearrange(visual_features, 'b f d -> b 1 1 f d')
-
-        batch_size = visual_features.shape[0]
-        device = visual_features.device
+        batch_size = pixel_values.size(0)
         input_ids, media_locations, attention_mask = processor.encode_text(
             prompt, device)
+
         input_ids = repeat(input_ids[0], 'l -> n l', n=batch_size)
         media_locations = repeat(media_locations[0], 'l -> n l', n=batch_size)
         attention_mask = repeat(attention_mask[0], 'l -> n l', n=batch_size)
 
         out_ids = self.generate(
             inputs=input_ids,
-            visual_features=visual_features,
+            # visual_features=visual_features,
             media_locations=media_locations,
             attention_mask=attention_mask,
+            pixel_values=pixel_values,
             num_beams=num_beams,
             early_stopping=True,
             use_cache=True,
