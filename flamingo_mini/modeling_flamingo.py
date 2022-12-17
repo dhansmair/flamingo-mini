@@ -205,11 +205,11 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
                 Then this will indicate the locations of 'real' tokens vs. the location of 'pad' tokens.
             media_locations (BoolTensor):   shape (n_batch, n_tokens).
                 indicates the locations of the starts of the <image> tags beginning, i.e. the location of the token representing '<'
-            #visual_features (FloatTensor):  shape (n_batch, n_images, n_frames, n_features, dim_feature).
-            
-            pixel_values (torch.Tensor | None):    shape [b N T c h w]. Optional.
-
-
+            pixel_values (torch.Tensor | None):    shape (b N T c h w). Optional.
+            visual_features (FloatTensor):         shape (b N q d). Optional.
+                If pixel_values already have been passed through encode_resample_visuals(), 
+                you can pass the resampled visual embeddings via this parameter.
+                If provided, pixel_values will be ignored
             use_cache (bool): whether to return the inner keys and values. Used to speed up text generation at inference. defaults to False
             past_key_values (tuple): tuple of past_key_values of (1) the xattn layers (2) the language model
             return_dict (bool): Whether to return a dictionary. Right now, only dicts are supported, so this must be set to True. Defaults to True.
@@ -297,6 +297,7 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
 
 
 class FlamingoGPT2(FlamingoBaseModel):
+    config: FlamingoConfig
     config_class = FlamingoConfig
 
     def __init__(self, config: FlamingoConfig):
@@ -315,10 +316,13 @@ class FlamingoGPT2(FlamingoBaseModel):
         self._init_layers(self.lm.h)
         
     def get_modified_layers(self):
+        if self.config.xattn_every == 1:
+            return self.lm.h
         return filter(lambda layer: isinstance(layer, ModifiedLMBlock), self.lm.h)
 
 
 class FlamingoOPT(FlamingoBaseModel):
+    config: FlamingoConfig
     config_class = FlamingoConfig
 
     def __init__(self, config: FlamingoConfig):
@@ -337,6 +341,8 @@ class FlamingoOPT(FlamingoBaseModel):
         self._init_layers(self.lm.decoder.layers)
         
     def get_modified_layers(self):
+        if self.config.xattn_every == 1:
+            return self.lm.decoder.layers
         return filter(lambda layer: isinstance(layer, ModifiedLMBlock), self.lm.decoder.layers)
 
 
@@ -374,6 +380,12 @@ class FlamingoModel(PreTrainedModel):
         if model_class is None:
             model_class = self._find_flamingo_class(config.lm)
         self.flamingo: FlamingoBaseModel = model_class(config)
+        
+        if config.freeze_language_model:
+            self.freeze_lm()
+
+        if config.freeze_vision_model:
+            self.freeze_vm()
 
     @classmethod
     def is_lm_supported(cls, lm_id: str) -> bool:
@@ -607,7 +619,8 @@ class FlamingoModel(PreTrainedModel):
             media_locations (torch.Tensor):     (b L)
             attention_mask (torch.Tensor):      (b L)
             pixel_values (torch.Tensor)         (N c h w)
-            visual_features (torch.FloatTensor):    [N q d]
+            visual_features (torch.FloatTensor):    (N q d)
+                These are the resampled visual embeddings 
                 (!) the visual features are treated as the same for the complete batch of sentences
 
         Returns:
@@ -615,7 +628,6 @@ class FlamingoModel(PreTrainedModel):
                 Tensor of shape [b], dtype torch.float 
         """
 
-        # assert visual_features.ndim == 4, f"visual features must have shape [N 1 q d], but has {visual_features.ndim} dimensions!"
         assert visual_features.ndim == 3, f"visual_features must have shape (N q d), but has {visual_features.ndim} dimensions!"
 
         n_choices = input_ids.size(0)

@@ -21,6 +21,8 @@ class FlamingoConfig(PretrainedConfig):
         resampler_num_time_embeds: int = 4,
         resampler_ff_mult: int = 4,
         resampler_act: str = 'gelu',
+        freeze_language_model: bool = True,
+        freeze_vision_model: bool = True,
         **kwargs
     ):
         """ Flamingo Configuration Class
@@ -42,6 +44,8 @@ class FlamingoConfig(PretrainedConfig):
             resampler_num_time_embeds (int): ?
             resampler_ff_mult (int): ?
             resampler_act (str): activation function of the resampler. Flamingo used 'sqrelu' in their paper.
+            freeze_language_model (bool): whether to freeze the language model or not.
+            freeze_vision_model (bool): whether to freeze the vision model or not.
         """
         super().__init__(**kwargs)
         self.lm = lm
@@ -60,3 +64,5 @@ class FlamingoConfig(PretrainedConfig):
         self.resampler_num_time_embeds = resampler_num_time_embeds
         self.resampler_ff_mult = resampler_ff_mult
         self.resampler_act = resampler_act
+        self.freeze_language_model = freeze_language_model
+        self.freeze_vision_model = freeze_vision_model
