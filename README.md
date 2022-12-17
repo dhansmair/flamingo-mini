@@ -55,6 +55,8 @@ resampler_num_latents: int = 64     # number of queries
 resampler_num_time_embeds: int = 4
 resampler_ff_mult: int = 4
 resampler_act: str = 'gelu'         # activation function in the resampler FFW blocks. Possible values: gelu, sqrelu, relu
+freeze_language_model: bool = True
+freeze_vision_model: bool = True
 
 ```
 
@@ -69,11 +71,20 @@ A complete example is provided in `examples/image_captioning.py`.
 
 ## Training
 *work in progress*  
-A core idea of Flamingo is to reuse off-the-shelf language model and vision encoder. As such, their weights are frozen during flamingo training, and only the perceiver resampler and the gated cross-attention layers are updated. Make sure requires_grad is set to False accordingly. FlamingoModel has a `freeze_lm()` method to set that for the language model. Note that in our implementation, this does not freeze the lm_head, as the embedding for the `<EOC>` token needs to be learned.  
-The architecture *might* be compatible with the <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, though I haven't tested that.
+A core idea of Flamingo is to reuse off-the-shelf language model and vision encoder. As such, their weights are frozen during flamingo training, and only the perceiver resampler and the gated cross-attention layers are updated. 
+
+Note that in our implementation, this does not freeze lm_head and token embeddings, as the embedding for the `<EOC>` token needs to be learned. 
+
+I am working on a training script with <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, and the current model is largely compatible with trainer.
 
 ### Using a different language model
-The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method. If you want to use a different tokenizer or vision encoder, you will need to implement a new processor similar to FlamingoProcessor.
+The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method.
+Every language model comes with a specific tokenizer, so make sure to adapt FlamingoProcessor to use the correct tokenizer.
+
+### Using a different vision encoder
+By default, the model uses the CLIP ViT-B vision encoder. A different encoder size can be set with the `clip_model_type` parameter.
+If you want to use a completely different encoder, e.g. ResNet, you will need to adjust FlamingoProcessor and replace the `vision_processor` property.
+You will also need to replace the `vision_encoder` property of FlamingoBaseModel and override the method `encode_resample_visuals()`
 
 A high level overview of this repository:
 
@@ -83,7 +94,7 @@ direction LR
 class FlamingoProcessor {
   FlamingoConfig config
   GPT2Tokenizer tokenizer
-  CLIPVisionModel vision_model
+  CLIPVisionProcessor vision_processor
   
   encode_text()
   extract_features()
@@ -91,8 +102,9 @@ class FlamingoProcessor {
 }
 class GPT2Tokenizer
 class CLIPVisionModel
+class CLIPVisionProcessor
 FlamingoProcessor *-- GPT2Tokenizer
-FlamingoProcessor *-- CLIPVisionModel
+FlamingoProcessor *-- CLIPVisionProcessor
 
 class FlamingoModel {
   FlamingoConfig config
@@ -107,6 +119,7 @@ class FlamingoModel {
 class FlamingoBaseModel {
   <<abstract>>
   FlamingoConfig config
+  CLIPVisionModel vision_encoder
   Linear lm_head
   forward()
   _init_layers()
@@ -119,6 +132,7 @@ class FlamingoGPT2 {
   GPT2Model lm
 }
 FlamingoModel *-- FlamingoBaseModel
+FlamingoBaseModel *-- CLIPVisionModel
 FlamingoBaseModel <|-- FlamingoOPT
 FlamingoBaseModel <|-- FlamingoGPT2
 ```
