@@ -76,27 +76,29 @@ class FlamingoProcessor:
         text: str | List[str],
         device: torch.device | None = None,
         max_length=None,
-        length=None
+        length=None,
+        return_tensors='pt',
+        return_attention_mask=True
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         
         if length is not None:
             result = self.tokenizer(
                 text,
-                return_tensors='pt',
-                return_attention_mask=True,
+                return_tensors=return_tensors,
+                return_attention_mask=return_attention_mask,
                 padding='max_length',
                 truncation=True,
                 max_length=length)
         elif max_length is None:
             result = self.tokenizer(
                 text,
-                return_tensors='pt', 
+                return_tensors=return_tensors, 
                 padding=True)
         else:
             result = self.tokenizer(
                 text,
-                return_tensors='pt',
-                return_attention_mask=True,
+                return_tensors=return_tensors,
+                return_attention_mask=return_attention_mask,
                 padding=True,
                 truncation=True,
                 max_length=max_length)

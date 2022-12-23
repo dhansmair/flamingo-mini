@@ -47,6 +47,7 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
     setting up the resampler and hijacking the LM layers with GatedXAttn layers.
     """
 
+    config: FlamingoConfig
     vision_encoder: CLIPVisionModel
     resampler: PerceiverResampler
     lm: PreTrainedModel
@@ -181,11 +182,13 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         
     def forward(
         self,
-        input_ids: torch.Tensor,
+        input_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         media_locations: torch.Tensor | None = None,
         pixel_values: torch.Tensor | None = None,
         visual_features: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
         use_cache: bool = False,
         past_key_values: tuple | None = None,
         return_dict: bool = True,
@@ -199,21 +202,23 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         https://huggingface.co/docs/transformers/model_doc/gpt2#transformers.GPT2Model.forward
 
         Args:
-            input_ids (LongTensor):         shape (n_batch, n_tokens). the tokenized input text
-            attention_mask (LongTensor):    shape (n_batch, n_tokens). 
+            input_ids (Tensor | None):         shape (n_batch, n_tokens). the tokenized input text
+            attention_mask (Tensor | None):    shape (n_batch, n_tokens). 
                 Mask as produced by the tokenizer. Required when a batch of input strings are tokenized and thus padded at the end.
                 Then this will indicate the locations of 'real' tokens vs. the location of 'pad' tokens.
-            media_locations (BoolTensor):   shape (n_batch, n_tokens).
+            media_locations (Tensor | None):   shape (n_batch, n_tokens).
                 indicates the locations of the starts of the <image> tags beginning, i.e. the location of the token representing '<'
-            pixel_values (torch.Tensor | None):    shape (b N T c h w). Optional.
-            visual_features (FloatTensor):         shape (b N q d). Optional.
+            pixel_values (Tensor | None):    shape (b N T c h w). Optional.
+            visual_features (Tensor | None):         shape (b N q d). Optional.
                 If pixel_values already have been passed through encode_resample_visuals(), 
                 you can pass the resampled visual embeddings via this parameter.
                 If provided, pixel_values will be ignored
+            head_mask (Tensor | None): TODO
+            inputs_embeds (Tensor | None): TODO
             use_cache (bool): whether to return the inner keys and values. Used to speed up text generation at inference. defaults to False
             past_key_values (tuple): tuple of past_key_values of (1) the xattn layers (2) the language model
             return_dict (bool): Whether to return a dictionary. Right now, only dicts are supported, so this must be set to True. Defaults to True.
-            labels (LongTensor): 
+            labels (Tensor): 
                 It is possible to pass the exact value as input_ids also as labels. If present, the output will contain a CE loss of the next token prediction.
                 optional, defaults to None
             **kwargs
@@ -223,33 +228,36 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
 
         """
 
-        assert return_dict
+        # sanity check
+        assert return_dict, "can only use return_dict=True at the moment!"
+        assert (input_ids is None) != (inputs_embeds is None), "you must pass either input_ids or inputs_embeds!"
 
-        if past_key_values is None:
-            xattn_past_key_values, lm_past_key_values = None, None
-        else:
-            xattn_past_key_values, lm_past_key_values = past_key_values
-            
-
-        if xattn_past_key_values is not None:
-            # use dummy visual features.
-            # This should not have an effect on the outcome of the model, unless media_locations is set incorrectly.
-            visual_features = torch.zeros((input_ids.size(0), 1, self.config.resampler_num_latents, self.config.dim_visual),
-                                          dtype=torch.float32,
-                                          device=input_ids.device)
-        elif pixel_values is not None:
-            assert pixel_values.size(0) == input_ids.size(0), \
-                "pixel_values must have the same batch size as the textual input!"
-            
-            visual_features = self.encode_resample_visuals(pixel_values)
-        else:
-            assert visual_features is not None
-
-        # visual_embedings shape (b N q d)
-        assert visual_features is not None
+        # find the input shape
+        batch_size, seq_length = input_ids.shape[:2] if input_ids is not None else inputs_embeds.shape[:2]
+        device = input_ids.device if input_ids is not None else inputs_embeds.device
+        xattn_past_key_values = None if past_key_values is None else past_key_values[0]
+        lm_past_key_values = None if past_key_values is None else past_key_values[1]
+        
+        if visual_features is None:
+            if xattn_past_key_values is None and pixel_values is not None:
+                # extract from pixels
+                assert pixel_values.size(0) == batch_size, \
+                    "pixel_values must have the same batch size as the textual input!"
+                
+                visual_features = self.encode_resample_visuals(pixel_values)
+                
+            else:
+                # we don't need visual_features is past is defined.
+                # use dummy values, since are only required for the shape
+                # visual_embedings shape (b N q d)
+                visual_features = torch.zeros(
+                    (batch_size, 1, self.config.resampler_num_latents, self.config.dim_visual),
+                    dtype=torch.float32,
+                    device=device
+                )
 
         if media_locations is None:
-            media_locations = torch.zeros_like(input_ids)
+            media_locations = torch.zeros(size=(batch_size, seq_length), dtype=torch.int, device=device)
 
         # condition xattn layers
         for i, xattn in enumerate(self.get_modified_layers()):
@@ -260,13 +268,15 @@ class FlamingoBaseModel(ABC, PreTrainedModel):
         out: BaseModelOutputWithPast = self.lm(
             input_ids=input_ids,
             attention_mask=attention_mask,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             past_key_values=lm_past_key_values,
             return_dict=True,
             **kwargs
         )
 
-        logits: torch.FloatTensor = self.lm_head(out.last_hidden_state)
+        logits: torch.Tensor = self.lm_head(out.last_hidden_state)
 
         # collect the past_key_values from the xattn layers
         if use_cache:
@@ -420,11 +430,13 @@ class FlamingoModel(PreTrainedModel):
 
     def forward(
         self,
-        input_ids: torch.Tensor,
+        input_ids: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         media_locations: torch.Tensor | None = None,
         pixel_values: torch.Tensor | None = None,
         visual_features: torch.Tensor | None = None,
+        head_mask: torch.Tensor | None = None,
+        inputs_embeds: torch.Tensor | None = None,
         use_cache: bool = False,
         past_key_values: tuple | None = None,
         return_dict: bool = True,
@@ -439,6 +451,8 @@ class FlamingoModel(PreTrainedModel):
             media_locations=media_locations,
             pixel_values=pixel_values,
             visual_features=visual_features,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
             use_cache=use_cache,
             past_key_values=past_key_values,
             return_dict=return_dict,
@@ -540,12 +554,16 @@ class FlamingoModel(PreTrainedModel):
         prompt: str = "<image>",
         max_length: int = 150,
         num_beams: int = 1,
-        device: torch.device | None = None
+        device: torch.device | None = None,
+        **kwargs
     ):
         """
         helper utility for image captioning.
         prompt is replicated for all batches.
         """
+        if device is None:
+            device = self.device
+
         if images is not None:
             assert pixel_values is None, "you can only pass either images or visual features to generate_captions()!"
 
@@ -575,7 +593,8 @@ class FlamingoModel(PreTrainedModel):
             bos_token_id=self.flamingo.lm.config.bos_token_id,
             eos_token_id=self.flamingo.lm.config.eos_token_id,
             pad_token_id=self.flamingo.lm.config.eos_token_id,
-            max_length=max_length
+            max_length=max_length,
+            **kwargs
         )
 
         captions = processor.tokenizer.batch_decode(
