@@ -19,25 +19,18 @@ class FlamingoProcessor:
     def __init__(
         self,
         config: FlamingoConfig,
-        device: torch.device | None = None,
         use_fast: bool = True,
         eoc_token: str = '<EOC>'
     ):
         """
         Args:
             config (FlamingoConfig): pass the same FlamingoConfig as used to initialize the FlamingoModel.
-            device (torch.device | None): if passed, vision_model will be directly loaded onto the device.
-            load_tokenizer (bool): whether to load the tokenizer or not.
-            load_vision_model (bool): whether to load the vision_model or not. In some cases we only need 
-                the tokenizer, then not loading the vision_model will save time.
             use_fast (bool): whether to use the fast tokenizer implementations from huggingface.
-            suppress_warnings (bool): when loading only the CLIPVisionModel from the checkpoint,
-                from_pretrained() will log a warning that some weights have not been used. We can ignore this.
+            eoc_token (str): string representation of the token to add.
         """
         self.config = config
-        self.device = device
         self.eoc_token = eoc_token
-        self.vision_processor = CLIPImageProcessor.from_pretrained(config.clip_model_type)
+        self.vision_processor = CLIPImageProcessor.from_pretrained(config.clip_model_type) #type: ignore
         
         if config.lm.startswith('gpt2'):
             if use_fast:
@@ -66,10 +59,6 @@ class FlamingoProcessor:
             self.tokenizer.encode("<")[-1],
             self.tokenizer.encode(" <")[-1]
         ]
-            
-    def to(self, device: torch.device | None):
-        self.device = device
-        self.dummy_output = self.dummy_output.to(device)
 
     def encode_text(
         self,
@@ -144,8 +133,6 @@ class FlamingoProcessor:
         text: str | List[str] | None = None, 
         device: torch.device | None = None
     ):
-        device = self.device if device is None else device
-
         result = {}
         
         if images is not None:

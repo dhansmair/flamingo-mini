@@ -4,11 +4,11 @@ from flamingo_mini.utils import load_url
 
 
 print('preparing model...')
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = FlamingoModel.from_pretrained('dhansmair/flamingo-tiny')
+device = torch.device('cuda:3' if torch.cuda.is_available() else 'cpu')
+model = FlamingoModel.from_pretrained('dhansmair/flamingo-mini')
 model.to(device)
 model.eval()
-processor = FlamingoProcessor(model.config, device=device)
+processor = FlamingoProcessor(model.config)
 
 # load and process an example image
 print('loading image and generating caption...')
