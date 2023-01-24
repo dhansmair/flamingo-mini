@@ -22,7 +22,7 @@ setup(
     'einops>=0.4',
     'einops-exts',
     'torch>=1.6',
-    'transformers>=4.21.0',
+    'transformers>=4.25.1',
     'numpy',
     'pillow'
   ],
