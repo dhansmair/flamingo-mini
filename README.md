@@ -1,9 +1,11 @@
 # Flamingo mini
-Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">deepmind  Flamingo</a> vision-language model, which enables an existing language model with to understand visual input such as images or videos. The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" targe="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.  
+Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-tasks-with-a-single-visual-language-model" target="blank">deepmind  Flamingo</a> vision-language model, which enables an existing language model with to understand visual input such as images or videos. The code is based on <a href="https://github.com/lucidrains/flamingo-pytorch" target="blank">Lucidrains implementation</a> of the perceiver resampler and the gated cross-attention layers, and utilizes pretrained vision and language models from <a href="https://huggingface.co/" target="blank"> 🤗 Hugging Face</a>. At the moment there are two versions available, based on GPT-2 and OPT. They have been tested with openai CLIP vision encoders `openai/clip-vit-base-patch32` and `openai/clip-vit-large-patch14`.  
 
 (!) Note that this repo is work in progress and may be subject to breaking changes.  
 
-- [x] provide simple training script -> currently in a separate branch: https://github.com/dhansmair/flamingo-mini/tree/training
+- [x] ~~provide simple training script -> currently in a separate branch: https://github.com/dhansmair/flamingo-mini/tree/training~~
+- [x] demo training script with huggingface trainer: https://github.com/dhansmair/flamingo-mini/tree/hf_trainer
+- [ ] <a href="https://huggingface.co/docs/transformers/v4.25.1/en/main_classes/pipelines" target="blank">pipeline</a> integration
 - [ ] create chatting demo
 
 
@@ -70,12 +72,12 @@ A complete example is provided in `examples/image_captioning.py`.
 
 
 ## Training
-*work in progress*  
 A core idea of Flamingo is to reuse off-the-shelf language model and vision encoder. As such, their weights are frozen during flamingo training, and only the perceiver resampler and the gated cross-attention layers are updated. 
+We can do that by setting the parameters `freeze_language_model` and `freeze_vision_model`, which are True by default (There is also methods `model.freeze_lm()` and `model.freeze_vm()`).  
+Note that in our implementation, this does not freeze the (shared) weights of lm_head / token embeddings, as the embedding for the `<EOC>` token needs to be learned.  
 
-Note that in our implementation, this does not freeze lm_head and token embeddings, as the embedding for the `<EOC>` token needs to be learned. 
-
-I am working on a training script with <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, and the current model is largely compatible with trainer.
+~~I am working on a training script with <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, and the current model is largely compatible with trainer.~~  
+A basic training script is here: https://github.com/dhansmair/flamingo-mini/tree/hf_trainer
 
 ### Using a different language model
 The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method.
@@ -84,7 +86,7 @@ Every language model comes with a specific tokenizer, so make sure to adapt Flam
 ### Using a different vision encoder
 By default, the model uses the CLIP ViT-B vision encoder. A different encoder size can be set with the `clip_model_type` parameter.
 If you want to use a completely different encoder, e.g. ResNet, you will need to adjust FlamingoProcessor and replace the `vision_processor` property.
-You will also need to replace the `vision_encoder` property of FlamingoBaseModel and override the method `encode_resample_visuals()`
+You will also need to replace the `vision_encoder` property of FlamingoBaseModel and override the method `encode_resample_visuals()`.
 
 A high level overview of this repository:
 
@@ -94,7 +96,7 @@ direction LR
 class FlamingoProcessor {
   FlamingoConfig config
   GPT2Tokenizer tokenizer
-  CLIPVisionProcessor vision_processor
+  CLIPImageProcessor vision_processor
   
   encode_text()
   extract_features()
@@ -102,9 +104,9 @@ class FlamingoProcessor {
 }
 class GPT2Tokenizer
 class CLIPVisionModel
-class CLIPVisionProcessor
+class CLIPImageProcessor
 FlamingoProcessor *-- GPT2Tokenizer
-FlamingoProcessor *-- CLIPVisionProcessor
+FlamingoProcessor *-- CLIPImageProcessor
 
 class FlamingoModel {
   FlamingoConfig config
@@ -120,6 +122,7 @@ class FlamingoBaseModel {
   <<abstract>>
   FlamingoConfig config
   CLIPVisionModel vision_encoder
+  PerceiverResampler resampler
   Linear lm_head
   forward()
   _init_layers()
