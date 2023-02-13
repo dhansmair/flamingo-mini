@@ -469,6 +469,7 @@ class FlamingoModel(PreTrainedModel):
         pixel_values: torch.Tensor | None = None,
         visual_features: torch.Tensor | None = None,
         past=None,
+        past_key_values=None,
         **kwargs
     ) -> Dict[str, Any]:
         """ hf specific function. Overridden from PreTrainedModel for text generation purposes.
@@ -478,6 +479,7 @@ class FlamingoModel(PreTrainedModel):
         This function replicates also the visual_features and media_locations accordingly.
 
         if use_cache is used, past is not None, then only the last column will be passed as input_ids.
+        TODO was `past` renamed to `past_key_values` in transformers 4.26?
         """
 
         if pixel_values is not None:
@@ -507,12 +509,12 @@ class FlamingoModel(PreTrainedModel):
                 media_locations = repeat(
                     media_locations, 'n ... -> (n m) ...', m=n_inputs // n_inputs_media)
 
-        if past is not None:
+        if past_key_values is not None or past is not None:
             input_ids = input_ids[:, -1:]
 
         return dict(
             input_ids=input_ids,
-            past_key_values=past,
+            past_key_values=past_key_values if past_key_values is not None else past,
             media_locations=media_locations,
             attention_mask=attention_mask,
             pixel_values=pixel_values,
