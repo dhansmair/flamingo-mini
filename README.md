@@ -4,7 +4,7 @@ Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-t
 (!) Note that this repo is work in progress and may be subject to breaking changes.  
 
 - [x] ~~provide simple training script -> currently in a separate branch: https://github.com/dhansmair/flamingo-mini/tree/training~~
-- [x] demo training script with huggingface trainer: https://github.com/dhansmair/flamingo-mini/tree/hf_trainer
+- [x] demo training script with huggingface trainer: https://github.com/dhansmair/flamingo-mini/tree/main/training
 - [ ] <a href="https://huggingface.co/docs/transformers/v4.25.1/en/main_classes/pipelines" target="blank">pipeline</a> integration
 - [ ] create chatting demo
 
