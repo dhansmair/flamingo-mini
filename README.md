@@ -13,6 +13,13 @@ Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-t
 A pretrained model is available at https://huggingface.co/dhansmair/flamingo-mini. You can find a demo of the model in <a href="https://huggingface.co/spaces/dhansmair/flamingo-mini-cap" target="blank">this hf space</a>.
 Disclaimer: This model was trained for image captioning on the <a href="https://ai.google.com/research/ConceptualCaptions/" target="blank">Conceptual Captions</a> dataset. In contrast, Deepmind's original flamingo models have been trained on huge interleaved image-text datasets which are not publicly accessible. Because of that, our model does not have the same few-shot capabilities, nor the exciting chatting abilities as the original. 
  
+### Will there be a stronger pretrained model released?
+Unfortunately I don't have time at the moment to put more effort into model pretraining.  
+For generative models that can ingest *single* images, there are other promising alternatives such as <a href="https://huggingface.co/docs/transformers/main/model_doc/blip-2" target="blank">BLIP-2</a> which can already be used for inference/finetuning.  
+The big selling point of Flamingo is the ability to handle interleaved vision-language data, but pretraining requires interleaved datasets, which we don't have at the moment.  
+But apparently, Hugging Face is also working on replicating Flamingo: https://www.linkedin.com/posts/victor-sanh_multimodal-llm-deeplearning-activity-7038583909994885120-BjsF  
+as well as LAION: https://laion.ai/blog/open-flamingo/
+
 
 ## Install
 (requires python 3.7)
