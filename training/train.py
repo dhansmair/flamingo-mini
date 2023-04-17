@@ -29,9 +29,9 @@ logger = logging.getLogger(__name__)
 
 
 # get images and annotations from https://cocodataset.org/#download
-COCO_ROOT      = '/nfs/data3/zhangya/coco2017/images'
-COCO_ANN_TRAIN = '/nfs/data3/hansmair/coco2017/captions_train2017.json'
-COCO_ANN_VAL   = '/nfs/data3/hansmair/coco2017/captions_val2017.json'
+COCO_ROOT      = '/kaggle/input'
+COCO_ANN_TRAIN = '/kaggle/working/caption_2m_train_v1.json'
+COCO_ANN_VAL   = '/kaggle/working/caption_2m_val_v1.json'
 
 
 class CLIPImageTransform:
@@ -53,7 +53,22 @@ def prepare_training_dataset(config: FlamingoConfig):
     ])
 
     def target_transform(captions):
+        # seems that the following return will only return the only caption if there is only one caption
+        # print('training caption: ', captions)
+        # print('returning: ', f"{random.choice(['', ' '])}<image>{random.choice(captions)}<EOC></s>")
         return f"{random.choice(['', ' '])}<image>{random.choice(captions)}<EOC></s>"
+    
+        # training caption:  ['A portrait photo of a kangaroo wearing an orange hoodie and blue \
+        # sunglasses standing on the grass in front of the Sydney Opera House holding a sign on \
+        # the chest that says Welcome Friends, subject: kangaroo, subject detail: wearing orange \
+        # hoodie, wearing blue sunglasses, subject location: sydney opera house, subject action: \
+        # holding sign.']
+
+        # returning:   <image>A portrait photo of a kangaroo wearing an orange hoodie and blue \
+        # sunglasses standing on the grass in front of the Sydney Opera House holding a sign on \
+        # the chest that says Welcome Friends, subject: kangaroo, subject detail: wearing orange \
+        # hoodie, wearing blue sunglasses, subject location: sydney opera house, subject action: \
+        # holding sign.<EOC></s>
 
     return CocoCaptions(
         COCO_ROOT, 
@@ -87,7 +102,8 @@ class DataCollator:
 @dataclass
 class FlamingoTrainingArguments(TrainingArguments):
     """ custom arguments """
-    eval_coco_captioning_prefix: str = field(default="<image>A picture of")         # It's a common thing to do for COCO image captioning
+    eval_coco_captioning_prefix: str = field(default="<image>")
+    # eval_coco_captioning_prefix: str = field(default="<image>A picture of")         # It's a common thing to do for COCO image captioning
     eval_coco_captioning_start: int = field(default=0)
     eval_coco_captioning_end: int = field(default=1000)
     
@@ -131,7 +147,7 @@ if __name__ == '__main__':
     logging.basicConfig(
         format=f'%(asctime)s {training_args.run_name} %(message)s', 
         datefmt='%H:%M:%S',
-        force=True,
+        # force=True,
         level=logging.INFO,
         handlers=[
             logging.StreamHandler(),
