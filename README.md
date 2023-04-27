@@ -3,7 +3,6 @@ Implementation of the <a href="https://www.deepmind.com/blog/tackling-multiple-t
 
 (!) Note that this repo is work in progress and may be subject to breaking changes.  
 
-- [x] ~~provide simple training script -> currently in a separate branch: https://github.com/dhansmair/flamingo-mini/tree/training~~
 - [x] demo training script with huggingface trainer: https://github.com/dhansmair/flamingo-mini/tree/main/training
 - [ ] <a href="https://huggingface.co/docs/transformers/v4.25.1/en/main_classes/pipelines" target="blank">pipeline</a> integration
 - [ ] create chatting demo
@@ -83,8 +82,8 @@ A core idea of Flamingo is to reuse off-the-shelf language model and vision enco
 We can do that by setting the parameters `freeze_language_model` and `freeze_vision_model`, which are True by default (There is also methods `model.freeze_lm()` and `model.freeze_vm()`).  
 Note that in our implementation, this does not freeze the (shared) weights of lm_head / token embeddings, as the embedding for the `<EOC>` token needs to be learned.  
 
-~~I am working on a training script with <a href="https://huggingface.co/docs/transformers/main_classes/trainer" target="blank">hf trainer</a>, and the current model is largely compatible with trainer.~~  
-A basic training script is here: https://github.com/dhansmair/flamingo-mini/tree/hf_trainer
+
+A basic training script that uses HuggingFace trainer is here: https://github.com/dhansmair/flamingo-mini/tree/main/training
 
 ### Using a different language model
 The FlamingoModel is implemented in such a way that no modification of the underlying language model's source code is necessary, so it should be relatively easy to extend the code to other models. However, some steps are required: Add a new `<EOC>` token to the vocabulary of tokenizer and language model. hf transformers offers a `resize_token_embeddings()` utility to adjust both the token embedding matrix and lm_head. FlamingoGPT2 and FlamingoOPT should give a good starting point. To inject the gated cross-attention layers, replace layers in the lm with wrappers using the `_init_layers()` method.
